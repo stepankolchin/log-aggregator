@@ -1,0 +1,70 @@
+# Запуск из директории deploy/:
+#   docker compose up --build
+#
+# Запуск из корня проекта:
+#   docker compose -f deploy/docker-compose.yml up --build
+
+services:
+
+  # ── Aggregator ─────────────────────────────────────────────────────────────
+  aggregator:
+    build:
+      context: ..                          # корень проекта как контекст сборки
+      dockerfile: deploy/Dockerfile.aggregator
+    ports:
+      - "8080:8080"                        # Web UI и API доступны на localhost:8080
+    volumes:
+      - logs:/app/logs                     # персистентное хранилище файловых логов
+      - ../configs:/app/configs:ro         # конфиг можно менять без пересборки
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  # ── Demo-сервисы ───────────────────────────────────────────────────────────
+  # Все три используют один образ, различаются только переменной SERVICE_NAME
+
+  auth-service:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.demo
+    environment:
+      SERVICE_NAME: auth-service
+      AGGREGATOR_URL: http://aggregator:8080
+    depends_on:
+      aggregator:
+        condition: service_healthy          # ждём пока aggregator пройдёт healthcheck
+    restart: unless-stopped
+
+  order-service:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.demo
+    environment:
+      SERVICE_NAME: order-service
+      AGGREGATOR_URL: http://aggregator:8080
+    depends_on:
+      aggregator:
+        condition: service_healthy
+    restart: unless-stopped
+
+  payment-service:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.demo
+    environment:
+      SERVICE_NAME: payment-service
+      AGGREGATOR_URL: http://aggregator:8080
+    depends_on:
+      aggregator:
+        condition: service_healthy
+    restart: unless-stopped
+
+# ── Volumes ────────────────────────────────────────────────────────────────
+volumes:
+  logs:
+    driver: local
+    # Логи хранятся в Docker volume — переживают перезапуск контейнеров

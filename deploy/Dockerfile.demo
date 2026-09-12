@@ -1,0 +1,27 @@
+# ── Этап 1: сборка ──────────────────────────────────────────────────────────
+FROM golang:1.22-alpine AS builder
+
+WORKDIR /src
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -ldflags="-s -w" \
+    -o /demo-service \
+    ./cmd/demo-service
+
+# ── Этап 2: минимальный runtime-образ ───────────────────────────────────────
+FROM alpine:3.19
+
+RUN apk add --no-cache ca-certificates tzdata
+
+WORKDIR /app
+COPY --from=builder /demo-service .
+
+# Имя сервиса и адрес aggregator задаются через переменные окружения в docker-compose
+ENV SERVICE_NAME=""
+ENV AGGREGATOR_URL="http://aggregator:8080"
+
+ENTRYPOINT ["/app/demo-service"]

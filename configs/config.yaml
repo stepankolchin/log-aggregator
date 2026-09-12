@@ -1,0 +1,52 @@
+server:
+  port: 8080
+  read_timeout: 10s
+  write_timeout: 10s
+
+worker:
+  pool_size: 4        # число параллельных воркеров обработки
+  buffer_size: 1024   # размер внутреннего канала логов
+
+storage:
+  memory_limit: 5000  # последних N логов хранятся в памяти для API
+
+sinks:
+  stdout:
+    enabled: true
+  file:
+    enabled: true
+    dir: "./logs"     # директория для файлов вида 2026-09-12.jsonl
+  webhook:
+    enabled: false
+    url: "http://localhost:9000/webhook"
+    timeout: 5s
+
+# Правила маршрутизации (fan-out: лог идёт во все совпавшие правила).
+# Если ни одно правило не совпало — срабатывает default.
+routes:
+  - name: "auth-errors"
+    match:
+      service: "auth-service"
+      level: "error"
+    sinks: [file, webhook]
+
+  - name: "payment-errors"
+    match:
+      service: "payment-service"
+      level: "error"
+    sinks: [file, stdout]
+
+  - name: "warn-and-above"
+    match:
+      levels: [warn, error]
+    sinks: [stdout]
+
+  - name: "order-slow"
+    match:
+      service: "order-service"
+      message_regex: "slow|timeout"
+    sinks: [file]
+
+  - name: "default"
+    match: {}           # совпадает со всем, что не попало ни в одно правило
+    sinks: [stdout]

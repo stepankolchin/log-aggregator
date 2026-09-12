@@ -1,0 +1,36 @@
+# ── Этап 1: сборка ──────────────────────────────────────────────────────────
+FROM golang:1.22-alpine AS builder
+
+WORKDIR /src
+
+# Копируем зависимости отдельным слоем — Docker кэширует его пока go.mod не изменился
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Копируем весь исходный код и собираем статический бинарь
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -ldflags="-s -w" \
+    -o /aggregator \
+    ./cmd/aggregator
+
+# ── Этап 2: минимальный runtime-образ ───────────────────────────────────────
+FROM alpine:3.19
+
+# ca-certificates — для HTTPS в webhook-синке
+# tzdata — корректные временные зоны в метках времени
+# wget — используется в healthcheck
+RUN apk add --no-cache ca-certificates tzdata wget
+
+WORKDIR /app
+
+COPY --from=builder /aggregator .
+COPY configs/ configs/
+
+# Директория для файловых логов; монтируется как volume в docker-compose
+RUN mkdir -p logs
+
+EXPOSE 8080
+
+ENTRYPOINT ["/app/aggregator"]
+CMD ["-config", "configs/config.yaml"]
