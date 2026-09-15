@@ -13,6 +13,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -23,6 +25,7 @@ import (
 	"github.com/stepankolchin/log-aggregator/internal/router"
 	"github.com/stepankolchin/log-aggregator/internal/sink"
 	"github.com/stepankolchin/log-aggregator/internal/storage"
+	"github.com/stepankolchin/log-aggregator/internal/worker"
 )
 
 // testEnv — окружение для интеграционных тестов.
@@ -618,6 +621,145 @@ func TestServer_Start_SuccessAndShutdown(t *testing.T) {
 	if err := srv.Shutdown(shutCtx); err != nil {
 		t.Fatalf("Shutdown failed: %v", err)
 	}
+}
+
+type testLoadPipeline struct {
+	stor *storage.Storage
+}
+
+func (p *testLoadPipeline) Process(_ context.Context, entry model.LogEntry) {
+	p.stor.Store(entry)
+}
+
+// TestServer_GracefulShutdown_UnderLoad проверяет корректность остановки сервиса под высокой параллельной нагрузкой:
+// 1. Непрерывная отправка логов множеством параллельных клиентов.
+// 2. Инициирование srv.Shutdown() прямо во время активных запросов.
+// 3. Отсутствие паник (включая гонки send on closed channel).
+// 4. Нулевая потеря подтвержденных логов (все принятые сервером логи гарантированно доходят до хранилища).
+func TestServer_GracefulShutdown_UnderLoad(t *testing.T) {
+	// Ищем свободный порт для реального TCP-сервера
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("net.Listen failed: %v", err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	ln.Close()
+
+	stor, err := storage.New(20000)
+	if err != nil {
+		t.Fatalf("storage.New failed: %v", err)
+	}
+
+	queue := make(chan model.LogEntry, 2000)
+	pipe := &testLoadPipeline{stor: stor}
+	pool := worker.New(queue, pipe, 8)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pool.Start(ctx)
+
+	handler := ingest.NewHandler(queue)
+	rtr, _ := router.New(nil, nil)
+
+	cfg := config.ServerConfig{
+		Port:         port,
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 5 * time.Second,
+	}
+	srv := api.New(cfg, handler, stor, rtr, t.TempDir())
+	if err := srv.Start(); err != nil {
+		t.Fatalf("srv.Start failed: %v", err)
+	}
+
+	baseURL := fmt.Sprintf("http://127.0.0.1:%d", port)
+
+	var acceptedLogs atomic.Int64
+	var clientErrors atomic.Int64
+	stopSending := make(chan struct{})
+	var wg sync.WaitGroup
+
+	// Запускаем 10 параллельных клиентов-писателей
+	const numClients = 10
+	client := &http.Client{
+		Timeout: 2 * time.Second,
+		Transport: &http.Transport{
+			MaxIdleConns:        100,
+			MaxIdleConnsPerHost: 100,
+		},
+	}
+
+	for clientID := 0; clientID < numClients; clientID++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			seq := 0
+			for {
+				select {
+				case <-stopSending:
+					return
+				default:
+				}
+
+				seq++
+				body := fmt.Sprintf(`{"service":"load-svc","level":"info","message":"load-%d-%d"}`, id, seq)
+				resp, err := client.Post(baseURL+"/api/v1/logs", "application/json", strings.NewReader(body))
+				if err != nil {
+					clientErrors.Add(1)
+					continue
+				}
+				io.Copy(io.Discard, resp.Body) //nolint:errcheck
+				resp.Body.Close()
+
+				if resp.StatusCode == http.StatusAccepted || resp.StatusCode == http.StatusOK {
+					acceptedLogs.Add(1)
+				} else {
+					clientErrors.Add(1)
+				}
+			}
+		}(clientID)
+	}
+
+	// Даём клиентам активно поработать под нагрузкой
+	time.Sleep(100 * time.Millisecond)
+
+	// Инициируем graceful shutdown прямо в процессе активной отправки запросов
+	shutCtx, shutCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer shutCancel()
+
+	if err := srv.Shutdown(shutCtx); err != nil {
+		t.Fatalf("srv.Shutdown failed: %v", err)
+	}
+
+	// Сигнализируем клиентам об остановке и закрываем входную очередь воркеров
+	close(stopSending)
+	close(queue)
+
+	// Дожидаемся вычитывания воркерами всех логов из очереди
+	pool.Wait()
+
+	// Дожидаемся завершения горутин клиентов
+	wg.Wait()
+
+	// Проверяем инварианты целостности данных
+	acceptedCount := acceptedLogs.Load()
+	ingestAccepted, _, _ := handler.Stats()
+	storageReceived := stor.GetStats().Total
+
+	if acceptedCount == 0 {
+		t.Fatal("ни один лог не был отправлен клиентами во время теста")
+	}
+
+	if acceptedCount != ingestAccepted {
+		t.Errorf("несовпадение: клиенты получили подтверждение для %d логов, но хендлер принял %d", acceptedCount, ingestAccepted)
+	}
+
+	if acceptedCount != storageReceived {
+		t.Fatalf("ПОТЕРЯ ДАННЫХ ПРИ SHUTDOWN: клиентам подтверждено %d логов, но в хранилище попало только %d (потеряно %d)",
+			acceptedCount, storageReceived, acceptedCount-storageReceived)
+	}
+
+	t.Logf("Успешный shutdown под нагрузкой: подтверждено и сохранено без потерь %d логов, отклонено при остановке %d запросов",
+		acceptedCount, clientErrors.Load())
 }
 
 // TestSwaggerUIAndOpenAPI проверяет доступность Swagger UI и спецификаций OpenAPI 3.0.
