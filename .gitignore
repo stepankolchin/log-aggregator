@@ -10,14 +10,6 @@ build/
 /aggregator
 /demo
 
-# Tests, test binaries and coverage reports
-*_test.go
-*.test
-*.out
-coverage.txt
-profile.out
-*.pprof
-
 # Application logs & runtime data
 logs/
 *.log
