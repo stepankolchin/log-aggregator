@@ -26,9 +26,11 @@ type AppConfig struct {
 
 // ServerConfig — параметры HTTP-сервера.
 type ServerConfig struct {
-	Port         int           `yaml:"port"`
-	ReadTimeout  time.Duration `yaml:"read_timeout"`
-	WriteTimeout time.Duration `yaml:"write_timeout"`
+	Port              int           `yaml:"port"`
+	ReadTimeout       time.Duration `yaml:"read_timeout"`
+	WriteTimeout      time.Duration `yaml:"write_timeout"`
+	DefaultQueryLimit int           `yaml:"default_query_limit"`
+	MaxQueryLimit     int           `yaml:"max_query_limit"`
 }
 
 // WorkerConfig — параметры пула воркеров.
@@ -39,7 +41,7 @@ type WorkerConfig struct {
 
 // StorageConfig — параметры хранилища.
 type StorageConfig struct {
-	// MemoryLimit — максимальное число логов в оперативной памяти для API.
+	// MemoryLimit — максимальное число логов в оперативной памяти для API (10..1000000).
 	MemoryLimit int `yaml:"memory_limit"`
 }
 
@@ -70,8 +72,8 @@ type FileSinkConfig struct {
 
 // WebhookSinkConfig — отправка POST-запроса на внешний URL.
 type WebhookSinkConfig struct {
-	Enabled bool `yaml:"enabled"`
-	URL     string `yaml:"url"`
+	Enabled bool          `yaml:"enabled"`
+	URL     string        `yaml:"url"`
 	Timeout time.Duration `yaml:"timeout"`
 	// RetryCount — число повторных попыток при ошибке отправки (0 = без повторов).
 	RetryCount int `yaml:"retry_count"`
@@ -99,7 +101,7 @@ type MatchConfig struct {
 	MessageRegex string `yaml:"message_regex"`
 }
 
-// Load читает конфигурацию из YAML-файла по указанному пути.
+// Load читает конфигурацию из YAML-файла по указанному пути и выполняет валидацию.
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -112,7 +114,36 @@ func Load(path string) (*Config, error) {
 	}
 
 	applyDefaults(cfg)
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("ошибка валидации конфига: %w", err)
+	}
 	return cfg, nil
+}
+
+// Validate проверяет корректность параметров конфигурации.
+func (c *Config) Validate() error {
+	if c.Storage.MemoryLimit < 10 || c.Storage.MemoryLimit > 1_000_000 {
+		return fmt.Errorf("недопустимый storage.memory_limit=%d: должен быть в диапазоне от 10 до 1 000 000", c.Storage.MemoryLimit)
+	}
+	if c.Worker.PoolSize < 1 {
+		return fmt.Errorf("worker.pool_size должен быть >= 1 (указано: %d)", c.Worker.PoolSize)
+	}
+	if c.Worker.BufferSize < 1 {
+		return fmt.Errorf("worker.buffer_size должен быть >= 1 (указано: %d)", c.Worker.BufferSize)
+	}
+	if c.Server.Port <= 0 || c.Server.Port > 65535 {
+		return fmt.Errorf("server.port должен быть от 1 до 65535 (указано: %d)", c.Server.Port)
+	}
+	if c.Server.DefaultQueryLimit < 1 {
+		return fmt.Errorf("server.default_query_limit должен быть >= 1 (указано: %d)", c.Server.DefaultQueryLimit)
+	}
+	if c.Server.MaxQueryLimit < 1 {
+		return fmt.Errorf("server.max_query_limit должен быть >= 1 (указано: %d)", c.Server.MaxQueryLimit)
+	}
+	if c.Server.DefaultQueryLimit > c.Server.MaxQueryLimit {
+		return fmt.Errorf("server.default_query_limit (%d) не может быть больше server.max_query_limit (%d)", c.Server.DefaultQueryLimit, c.Server.MaxQueryLimit)
+	}
+	return nil
 }
 
 // applyDefaults заполняет нулевые значения разумными умолчаниями.
@@ -128,6 +159,12 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.Server.WriteTimeout == 0 {
 		cfg.Server.WriteTimeout = 10 * time.Second
+	}
+	if cfg.Server.DefaultQueryLimit == 0 {
+		cfg.Server.DefaultQueryLimit = 100
+	}
+	if cfg.Server.MaxQueryLimit == 0 {
+		cfg.Server.MaxQueryLimit = 1000
 	}
 	if cfg.Worker.PoolSize == 0 {
 		cfg.Worker.PoolSize = 4
@@ -151,4 +188,3 @@ func applyDefaults(cfg *Config) {
 		cfg.Sinks.Webhook.Timeout = 5 * time.Second
 	}
 }
-

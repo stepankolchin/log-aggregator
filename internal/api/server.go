@@ -17,6 +17,7 @@ import (
 
 // Server — HTTP-сервер агрегатора со всеми зарегистрированными маршрутами.
 type Server struct {
+	cfg       config.ServerConfig
 	http      *http.Server
 	handler   *ingest.Handler
 	storage   *storage.Storage
@@ -32,6 +33,7 @@ func New(
 	rtr *router.Router,
 ) *Server {
 	s := &Server{
+		cfg:       cfg,
 		handler:   handler,
 		storage:   stor,
 		router:    rtr,
@@ -66,7 +68,9 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
 	mux.HandleFunc("GET /readyz", s.handleReadyz)
 
-	// Web UI (заглушка, будет заменена в этапе 6)
+	// Web UI
+	mux.HandleFunc("GET /style.css", s.handleCSS)
+	mux.HandleFunc("GET /app.js", s.handleJS)
 	mux.HandleFunc("/", s.handleUI)
 }
 
@@ -111,6 +115,18 @@ func (s *Server) handleUI(w http.ResponseWriter, r *http.Request) {
 	w.Write(web.IndexHTML) //nolint:errcheck
 }
 
+// handleCSS — отдаёт встроенный файл стилей.
+func (s *Server) handleCSS(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/css; charset=utf-8")
+	w.Write(web.StyleCSS) //nolint:errcheck
+}
+
+// handleJS — отдаёт встроенный клиентский скрипт.
+func (s *Server) handleJS(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+	w.Write(web.AppJS) //nolint:errcheck
+}
+
 // writeJSON сериализует v в JSON и записывает в ResponseWriter.
 func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
@@ -118,4 +134,9 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	if err := json.NewEncoder(w).Encode(v); err != nil {
 		slog.Error("ошибка сериализации ответа", "err", err)
 	}
+}
+
+// writeError отправляет JSON-ответ с описанием ошибки.
+func writeError(w http.ResponseWriter, code int, msg string) {
+	writeJSON(w, code, map[string]string{"error": msg})
 }

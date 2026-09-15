@@ -3,6 +3,7 @@ package storage
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,20 @@ import (
 	"time"
 
 	"github.com/stepankolchin/log-aggregator/internal/model"
+)
+
+const (
+	// MinMemoryLimit — минимально допустимый лимит записей в памяти.
+	MinMemoryLimit = 10
+	// DefaultMemoryLimit — лимит по умолчанию (5 000 записей).
+	DefaultMemoryLimit = 5000
+	// MaxMemoryLimit — абсолютная верхняя граница записей в памяти для предотвращения OOM (1 000 000 записей).
+	MaxMemoryLimit = 1_000_000
+
+	// MaxQueryLimit — максимальное количество записей, возвращаемых за один API-запрос (1 000).
+	MaxQueryLimit = 1000
+	// DefaultQueryLimit — количество записей по умолчанию при API-запросе (100).
+	DefaultQueryLimit = 100
 )
 
 // QueryParams — параметры фильтрации при запросе логов через API.
@@ -41,12 +56,28 @@ type Storage struct {
 }
 
 // New создаёт хранилище с лимитом записей в памяти.
-func New(limit int) *Storage {
+// Возвращает явную ошибку, если лимит выходит за допустимый диапазон [MinMemoryLimit, MaxMemoryLimit].
+func New(limit int) (*Storage, error) {
+	if limit < MinMemoryLimit || limit > MaxMemoryLimit {
+		return nil, fmt.Errorf("storage: недопустимый memory_limit %d (допустимый диапазон: %d..%d)", limit, MinMemoryLimit, MaxMemoryLimit)
+	}
+
+	initCap := limit
+	if initCap > 1024 {
+		initCap = 1024
+	}
+
 	return &Storage{
 		limit:     limit,
+		logs:      make([]model.LogEntry, 0, initCap),
 		byService: make(map[string]int64),
 		byLevel:   make(map[string]int64),
-	}
+	}, nil
+}
+
+// Limit возвращает установленный лимит записей в памяти.
+func (s *Storage) Limit() int {
+	return s.limit
 }
 
 // Store добавляет запись в память. Если превышен лимит — вытесняет самые старые.
@@ -56,8 +87,14 @@ func (s *Storage) Store(entry model.LogEntry) {
 
 	s.logs = append(s.logs, entry)
 	if len(s.logs) > s.limit {
-		// Отбрасываем первую четверть буфера разом, чтобы не перекладывать срез каждый раз
+		// Отбрасываем минимум 1 запись или четверть лимита
 		cutAt := s.limit / 4
+		if cutAt < 1 {
+			cutAt = 1
+		}
+
+		// Зануляем элементы перед срезкой, чтобы сборщик мусора (GC) освободил память
+		clear(s.logs[:cutAt])
 		s.logs = s.logs[cutAt:]
 	}
 
@@ -67,16 +104,25 @@ func (s *Storage) Store(entry model.LogEntry) {
 }
 
 // Query возвращает логи по фильтрам; новые записи идут первыми.
+// Безопасно выделяет память с учётом фактического количества логов в хранилище.
 func (s *Storage) Query(p QueryParams) []model.LogEntry {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	limit := p.Limit
 	if limit <= 0 {
-		limit = 100
+		limit = DefaultQueryLimit
+	} else if limit > MaxQueryLimit {
+		limit = MaxQueryLimit
 	}
 
-	result := make([]model.LogEntry, 0, limit)
+	// Выделяем емкость не больше, чем реально доступно в памяти хранилища
+	initCap := limit
+	if len(s.logs) < initCap {
+		initCap = len(s.logs)
+	}
+
+	result := make([]model.LogEntry, 0, initCap)
 	search := strings.ToLower(p.Search)
 
 	// Обходим с конца — самые новые записи первыми

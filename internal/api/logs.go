@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -14,15 +15,31 @@ import (
 //	service — фильтр по имени сервиса (точное совпадение)
 //	level   — фильтр по уровню: debug, info, warn, error
 //	search  — подстрока для поиска в поле message
-//	limit   — максимальное число записей (по умолчанию 100)
+//	limit   — число записей (по умолчанию server.default_query_limit, максимум server.max_query_limit)
 func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 
-	limit := 100
+	limit := s.cfg.DefaultQueryLimit
+	if limit <= 0 {
+		limit = 100
+	}
+
+	maxLimit := s.cfg.MaxQueryLimit
+	if maxLimit <= 0 {
+		maxLimit = 1000
+	}
+
 	if raw := q.Get("limit"); raw != "" {
-		if v, err := strconv.Atoi(raw); err == nil && v > 0 {
-			limit = v
+		v, err := strconv.Atoi(raw)
+		if err != nil || v <= 0 {
+			writeError(w, http.StatusBadRequest, "параметр limit должен быть положительным числом")
+			return
 		}
+		if v > maxLimit {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("параметр limit (%d) превышает допустимый максимум (%d), установленный в конфигурации сервера (server.max_query_limit)", v, maxLimit))
+			return
+		}
+		limit = v
 	}
 
 	params := storage.QueryParams{

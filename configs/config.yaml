@@ -2,6 +2,9 @@ server:
   port: 8080
   read_timeout: 10s
   write_timeout: 10s
+  default_query_limit: 100 # число логов по умолчанию для GET /api/v1/logs
+  max_query_limit: 1000    # максимальный limit для GET /api/v1/logs
+
 
 worker:
   pool_size: 4        # число параллельных воркеров обработки

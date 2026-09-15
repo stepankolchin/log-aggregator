@@ -27,8 +27,8 @@ type pipeline struct {
 }
 
 func (p *pipeline) Process(ctx context.Context, entry model.LogEntry) {
-	p.rtr.Process(ctx, entry)  // маршрутизация → синки
-	p.stor.Store(entry)        // сохранение в память для API
+	p.rtr.Process(ctx, entry) // маршрутизация → синки
+	p.stor.Store(entry)       // сохранение в память для API
 }
 
 func main() {
@@ -81,7 +81,11 @@ func main() {
 	slog.Info("роутер инициализирован", "rules", len(cfg.Routes))
 
 	// ── Хранилище ────────────────────────────────────────────────────────────
-	stor := storage.New(cfg.Storage.MemoryLimit)
+	stor, err := storage.New(cfg.Storage.MemoryLimit)
+	if err != nil {
+		slog.Error("ошибка инициализации хранилища", "err", err)
+		os.Exit(1)
+	}
 
 	// При старте восстанавливаем данные сегодняшнего дня из файла
 	if cfg.Sinks.File.Enabled {
@@ -123,9 +127,12 @@ func main() {
 		slog.Error("ошибка при завершении HTTP-сервера", "err", err)
 	}
 
-	// 2. Воркеры: отменяем контекст, ждём пока все горутины завершатся
-	cancel()
+	// 2. Закрываем входной канал очереди: новых запросов больше не будет
+	close(queue)
+
+	// 3. Воркеры: вычитывают оставшиеся в буфере канала записи до конца и завершаются
 	pool.Wait()
+	cancel()
 	slog.Info("воркеры завершены")
 
 	// 3. Файловый синк: сбрасываем буфер и закрываем файл
