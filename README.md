@@ -571,5 +571,6 @@ go test -race ./...
 
 ***Demo***
 
+<img width="852" height="480" alt="log-aggregator_demo" src="https://github.com/user-attachments/assets/af35b183-0c1a-41fc-a619-95a91e41d571" />
 
 
