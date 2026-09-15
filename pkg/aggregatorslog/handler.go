@@ -43,6 +43,7 @@ type Handler struct {
 	host     string       // hostname машины (заполняется автоматически)
 	minLevel slog.Level   // минимальный уровень для отправки
 	attrs    []slog.Attr  // постоянные атрибуты, добавленные через WithAttrs
+	groups   []string     // активные группы, добавленные через WithGroup
 	client   *http.Client // HTTP-клиент для отправки логов
 	fallback slog.Handler // резервный handler на случай сбоя отправки (по умолчанию os.Stderr)
 	onError  ErrorHandler // обработчик ошибок доставки
@@ -146,14 +147,15 @@ func (h *Handler) Handle(ctx context.Context, r slog.Record) error {
 	// Собираем все атрибуты записи в map[string]string
 	fields := make(map[string]string, r.NumAttrs()+len(h.attrs))
 
-	// Сначала постоянные атрибуты (из WithAttrs)
+	// Сначала постоянные атрибуты (из WithAttrs, они уже префиксированы)
 	for _, a := range h.attrs {
 		fields[a.Key] = a.Value.String()
 	}
 
-	// Затем атрибуты текущего вызова (slog.Info("msg", "key", val))
+	// Затем атрибуты текущей записи с учётом активного стека групп
+	prefix := strings.Join(h.groups, ".")
 	r.Attrs(func(a slog.Attr) bool {
-		fields[a.Key] = a.Value.String()
+		flattenAttrs(prefix, a, fields)
 		return true
 	})
 
@@ -230,29 +232,80 @@ func (h *Handler) handleFailure(ctx context.Context, r slog.Record, err error) e
 }
 
 // WithAttrs возвращает новый Handler с добавленными постоянными атрибутами.
-// Эти атрибуты будут присутствовать во всех последующих записях.
+// Атрибуты квалифицируются текущим префиксом групп.
 func (h *Handler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	if len(attrs) == 0 {
+		return h
+	}
 	clone := *h
-	clone.attrs = make([]slog.Attr, len(h.attrs)+len(attrs))
+	prefix := strings.Join(h.groups, ".")
+
+	attrMap := make(map[string]string, len(attrs))
+	for _, a := range attrs {
+		flattenAttrs(prefix, a, attrMap)
+	}
+
+	newAttrs := make([]slog.Attr, 0, len(attrMap))
+	for k, v := range attrMap {
+		newAttrs = append(newAttrs, slog.String(k, v))
+	}
+
+	clone.attrs = make([]slog.Attr, len(h.attrs)+len(newAttrs))
 	copy(clone.attrs, h.attrs)
-	copy(clone.attrs[len(h.attrs):], attrs)
+	copy(clone.attrs[len(h.attrs):], newAttrs)
+
 	if clone.fallback != nil {
 		clone.fallback = clone.fallback.WithAttrs(attrs)
 	}
 	return &clone
 }
 
-// WithGroup возвращает новый Handler с группировкой атрибутов под именем группы.
-// В нашей реализации группа добавляется как суффикс к имени сервиса.
+// WithGroup возвращает новый Handler с группировкой атрибутов под именем группы (namespace префикс).
 func (h *Handler) WithGroup(name string) slog.Handler {
+	if name == "" {
+		return h
+	}
 	clone := *h
-	if name != "" {
-		clone.service = h.service + "." + name
-		if clone.fallback != nil {
-			clone.fallback = clone.fallback.WithGroup(name)
-		}
+	clone.groups = make([]string, len(h.groups)+1)
+	copy(clone.groups, h.groups)
+	clone.groups[len(h.groups)] = name
+
+	if clone.fallback != nil {
+		clone.fallback = clone.fallback.WithGroup(name)
 	}
 	return &clone
+}
+
+// flattenAttrs рекурсивно извлекает и форматирует атрибуты, учитывая префикс групп и вложенные slog.KindGroup.
+func flattenAttrs(prefix string, a slog.Attr, out map[string]string) {
+	a.Value = a.Value.Resolve()
+	if a.Equal(slog.Attr{}) {
+		return
+	}
+	if a.Value.Kind() == slog.KindGroup {
+		groupAttrs := a.Value.Group()
+		if len(groupAttrs) == 0 {
+			return
+		}
+		newPrefix := prefix
+		if a.Key != "" {
+			if prefix != "" {
+				newPrefix = prefix + "." + a.Key
+			} else {
+				newPrefix = a.Key
+			}
+		}
+		for _, ga := range groupAttrs {
+			flattenAttrs(newPrefix, ga, out)
+		}
+		return
+	}
+
+	key := a.Key
+	if prefix != "" {
+		key = prefix + "." + key
+	}
+	out[key] = a.Value.String()
 }
 
 // slogLevelToString конвертирует slog.Level в строку, понятную aggregator.

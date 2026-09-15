@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"time"
 )
@@ -26,7 +27,7 @@ func (s *Server) handleStats(w http.ResponseWriter, _ *http.Request) {
 	storStats := s.storage.GetStats()
 
 	resp := statsResponse{
-		Uptime:    formatUptime(time.Since(s.startTime)),
+		Uptime:    FormatUptime(time.Since(s.startTime)),
 		Accepted:  accepted,
 		Dropped:   dropped,
 		Errors:    errors,
@@ -38,17 +39,26 @@ func (s *Server) handleStats(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// formatUptime форматирует длительность в читаемую строку.
-func formatUptime(d time.Duration) string {
+// FormatUptime форматирует длительность в читаемую строку вида "2d 5h 23m", "5h 23m 15s", "23m 15s" или "15s".
+func FormatUptime(d time.Duration) string {
 	d = d.Round(time.Second)
+	days := d / (24 * time.Hour)
+	d -= days * 24 * time.Hour
 	h := d / time.Hour
 	d -= h * time.Hour
 	m := d / time.Minute
 	d -= m * time.Minute
 	sec := d / time.Second
-	if h > 0 {
-		return time.Duration(h).String()[0:] + "h " +
-			time.Duration(m*time.Minute+sec*time.Second).String()
+
+	if days > 0 {
+		return fmt.Sprintf("%dd %dh %dm", days, h, m)
 	}
-	return time.Duration(m*time.Minute + sec*time.Second).String()
+	if h > 0 {
+		return fmt.Sprintf("%dh %dm %ds", h, m, sec)
+	}
+	if m > 0 {
+		return fmt.Sprintf("%dm %ds", m, sec)
+	}
+	return fmt.Sprintf("%ds", sec)
 }
+

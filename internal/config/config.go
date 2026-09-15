@@ -2,7 +2,9 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -122,15 +124,14 @@ func Load(path string) (*Config, error) {
 
 // Validate проверяет корректность параметров конфигурации.
 func (c *Config) Validate() error {
-	if c.Storage.MemoryLimit < 10 || c.Storage.MemoryLimit > 100_000 {
-		return fmt.Errorf("недопустимый storage.memory_limit=%d: должен быть в диапазоне от 10 до 100 000", c.Storage.MemoryLimit)
+	// App
+	switch strings.ToLower(c.App.LogLevel) {
+	case "debug", "info", "warn", "warning", "error":
+	default:
+		return fmt.Errorf("недопустимый app.log_level=%q: допустимы debug, info, warn, error", c.App.LogLevel)
 	}
-	if c.Worker.PoolSize < 1 {
-		return fmt.Errorf("worker.pool_size должен быть >= 1 (указано: %d)", c.Worker.PoolSize)
-	}
-	if c.Worker.BufferSize < 1 {
-		return fmt.Errorf("worker.buffer_size должен быть >= 1 (указано: %d)", c.Worker.BufferSize)
-	}
+
+	// Server
 	if c.Server.Port <= 0 || c.Server.Port > 65535 {
 		return fmt.Errorf("server.port должен быть от 1 до 65535 (указано: %d)", c.Server.Port)
 	}
@@ -143,6 +144,77 @@ func (c *Config) Validate() error {
 	if c.Server.DefaultQueryLimit > c.Server.MaxQueryLimit {
 		return fmt.Errorf("server.default_query_limit (%d) не может быть больше server.max_query_limit (%d)", c.Server.DefaultQueryLimit, c.Server.MaxQueryLimit)
 	}
+
+	// Worker
+	if c.Worker.PoolSize < 1 || c.Worker.PoolSize > 256 {
+		return fmt.Errorf("worker.pool_size должен быть в диапазоне от 1 до 256 (указано: %d)", c.Worker.PoolSize)
+	}
+	if c.Worker.BufferSize < 1 || c.Worker.BufferSize > 1_000_000 {
+		return fmt.Errorf("worker.buffer_size должен быть в диапазоне от 1 до 1 000 000 (указано: %d)", c.Worker.BufferSize)
+	}
+
+	// Storage
+	if c.Storage.MemoryLimit < 10 || c.Storage.MemoryLimit > 100_000 {
+		return fmt.Errorf("недопустимый storage.memory_limit=%d: должен быть в диапазоне от 10 до 100 000", c.Storage.MemoryLimit)
+	}
+
+	// Sinks - Stdout
+	switch strings.ToLower(c.Sinks.Stdout.Format) {
+	case "json", "text", "":
+	default:
+		return fmt.Errorf("недопустимый sinks.stdout.format=%q: допустимы json, text", c.Sinks.Stdout.Format)
+	}
+
+	// Sinks - File
+	switch strings.ToLower(c.Sinks.File.Pattern) {
+	case "flat", "by-service", "by-date", "":
+	default:
+		return fmt.Errorf("недопустимый sinks.file.pattern=%q: допустимы flat, by-service, by-date", c.Sinks.File.Pattern)
+	}
+
+	// Sinks - Webhook
+	if c.Sinks.Webhook.Enabled {
+		if c.Sinks.Webhook.URL == "" {
+			return fmt.Errorf("sinks.webhook.url не может быть пустым при включённом webhook")
+		}
+		u, err := url.ParseRequestURI(c.Sinks.Webhook.URL)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return fmt.Errorf("некорректный адрес sinks.webhook.url=%q: требуется валидный HTTP/HTTPS URL", c.Sinks.Webhook.URL)
+		}
+		if c.Sinks.Webhook.RetryCount < 0 || c.Sinks.Webhook.RetryCount > 10 {
+			return fmt.Errorf("sinks.webhook.retry_count должен быть от 0 до 10 (указано: %d)", c.Sinks.Webhook.RetryCount)
+		}
+	}
+
+	// Routes & Sink destinations
+	enabledSinks := make(map[string]bool)
+	enabledSinks["discard"] = true
+	if c.Sinks.Stdout.Enabled {
+		enabledSinks["stdout"] = true
+	}
+	if c.Sinks.File.Enabled {
+		enabledSinks["file"] = true
+	}
+	if c.Sinks.Webhook.Enabled {
+		enabledSinks["webhook"] = true
+	}
+
+	for _, r := range c.Routes {
+		if r.Name == "" {
+			return fmt.Errorf("правило маршрутизации содержит пустое имя name")
+		}
+		for _, s := range r.Sinks {
+			if !enabledSinks[s] {
+				// Проверим, известен ли такой синк вообще, но выключен
+				known := s == "stdout" || s == "file" || s == "webhook"
+				if known {
+					return fmt.Errorf("правило маршрутизации %q ссылается на выключенный sink %q", r.Name, s)
+				}
+				return fmt.Errorf("правило маршрутизации %q ссылается на неизвестный sink %q", r.Name, s)
+			}
+		}
+	}
+
 	return nil
 }
 

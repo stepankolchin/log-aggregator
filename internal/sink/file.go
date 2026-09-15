@@ -6,75 +6,108 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/stepankolchin/log-aggregator/internal/model"
 )
 
-// File пишет логи в JSON Lines файлы с ежедневной ротацией.
-// Файлы называются по дате: 2026-09-12.jsonl
+// File пишет логи в JSON Lines файлы с ежедневной ротацией и поддержкой различных паттернов структуры директорий.
 type File struct {
-	dir     string
-	mu      sync.Mutex
-	file    *os.File   // текущий открытый файл
-	dateKey string     // дата открытого файла (YYYY-MM-DD)
+	dir         string
+	pattern     string
+	mu          sync.Mutex
+	files       map[string]*os.File // открытые файлы: путь -> *os.File
+	currentDate string              // текущая дата (YYYY-MM-DD) для отслеживания ротации
 }
 
-// NewFile создаёт файловый синк с указанной директорией.
-func NewFile(dir string) (*File, error) {
+// NewFile создаёт файловый синк с указанной директорией и паттерном организации файлов.
+func NewFile(dir, pattern string) (*File, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("создание директории логов %q: %w", dir, err)
 	}
-	return &File{dir: dir}, nil
+	if pattern == "" {
+		pattern = "flat"
+	}
+	return &File{
+		dir:     dir,
+		pattern: strings.ToLower(pattern),
+		files:   make(map[string]*os.File),
+	}, nil
 }
 
 func (f *File) Name() string { return "file" }
 
-// Write записывает лог в файл текущего дня.
-// При смене даты автоматически открывает новый файл (ротация).
+// Write записывает лог в файл текущего дня в соответствии с выбранным паттерном.
 func (f *File) Write(_ context.Context, entry model.LogEntry) error {
 	today := time.Now().Format("2006-01-02")
+	service := entry.Service
+	if service == "" {
+		service = "unknown"
+	}
 
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	// Открываем новый файл если он ещё не открыт или день сменился
-	if f.file == nil || f.dateKey != today {
-		if err := f.rotate(today); err != nil {
-			return err
+	// При смене дня закрываем все файлы предыдущего дня (ротация)
+	if f.currentDate != "" && f.currentDate != today {
+		for _, file := range f.files {
+			if file != nil {
+				_ = file.Close()
+			}
 		}
+		f.files = make(map[string]*os.File)
+	}
+	f.currentDate = today
+
+	var targetPath string
+	switch f.pattern {
+	case "by-service":
+		targetPath = filepath.Join(f.dir, service, today+".jsonl")
+	case "by-date":
+		targetPath = filepath.Join(f.dir, today, service+".jsonl")
+	case "flat":
+		fallthrough
+	default:
+		targetPath = filepath.Join(f.dir, today+".jsonl")
+	}
+
+	file, ok := f.files[targetPath]
+	if !ok || file == nil {
+		dir := filepath.Dir(targetPath)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("создание поддиректории логов %q: %w", dir, err)
+		}
+		newFile, err := os.OpenFile(targetPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+		if err != nil {
+			return fmt.Errorf("открытие файла лога %q: %w", targetPath, err)
+		}
+		file = newFile
+		f.files[targetPath] = file
 	}
 
 	data, err := json.Marshal(entry)
 	if err != nil {
 		return fmt.Errorf("сериализация лога: %w", err)
 	}
-	_, err = fmt.Fprintf(f.file, "%s\n", data)
+	_, err = fmt.Fprintf(file, "%s\n", data)
 	return err
 }
 
-// rotate закрывает старый файл и открывает новый для указанной даты.
-func (f *File) rotate(date string) error {
-	if f.file != nil {
-		_ = f.file.Close()
-	}
-	path := filepath.Join(f.dir, date+".jsonl")
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
-	if err != nil {
-		return fmt.Errorf("открытие файла лога %q: %w", path, err)
-	}
-	f.file = file
-	f.dateKey = date
-	return nil
-}
-
-// Close корректно закрывает текущий файл при завершении работы.
+// Close корректно закрывает все открытые файлы при завершении работы.
 func (f *File) Close() error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.file != nil {
-		return f.file.Close()
+
+	var firstErr error
+	for path, file := range f.files {
+		if file != nil {
+			if err := file.Close(); err != nil && firstErr == nil {
+				firstErr = fmt.Errorf("закрытие файла %q: %w", path, err)
+			}
+		}
 	}
-	return nil
+	f.files = make(map[string]*os.File)
+	return firstErr
 }

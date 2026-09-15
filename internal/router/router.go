@@ -34,6 +34,17 @@ func New(routes []config.RouteConfig, sinks []Sink) (*Router, error) {
 		sinkMap[s.Name()] = s
 	}
 
+	// Валидируем, что все синки в правилах зарегистрированы либо являются "discard"
+	for _, r := range routes {
+		for _, sinkName := range r.Sinks {
+			if sinkName != "discard" {
+				if _, ok := sinkMap[sinkName]; !ok {
+					return nil, fmt.Errorf("правило %q ссылается на незарегистрированный sink %q", r.Name, sinkName)
+				}
+			}
+		}
+	}
+
 	return &Router{rules: rules, sinks: sinkMap}, nil
 }
 

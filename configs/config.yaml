@@ -1,3 +1,6 @@
+app:
+  log_level: "info"     # уровень логирования агрегатора: debug, info, warn, error
+
 server:
   port: 8080
   read_timeout: 10s
@@ -5,24 +8,28 @@ server:
   default_query_limit: 100 # число логов по умолчанию для GET /api/v1/logs
   max_query_limit: 1000    # максимальный limit для GET /api/v1/logs
 
-
 worker:
-  pool_size: 4        # число параллельных воркеров обработки
-  buffer_size: 1024   # размер внутреннего канала логов
+  pool_size: 4        # число параллельных воркеров обработки (1..256)
+  buffer_size: 1024   # размер внутреннего канала логов (1..1000000)
 
 storage:
-  memory_limit: 5000  # последних N логов хранятся в памяти для API
+  memory_limit: 5000  # последних N логов хранятся в памяти для API (10..100000)
 
 sinks:
   stdout:
     enabled: true
+    format: "json"    # формат вывода: "json" или "text"
   file:
     enabled: true
-    dir: "./logs"     # директория для файлов вида 2026-09-12.jsonl
+    dir: "./logs"     # директория для сохранения логов
+    pattern: "flat"   # структура: flat (YYYY-MM-DD.jsonl), by-service (service/YYYY-MM-DD.jsonl), by-date (YYYY-MM-DD/service.jsonl)
   webhook:
     enabled: false
     url: "http://localhost:9000/webhook"
     timeout: 5s
+    retry_count: 3    # число повторов при ошибке отправки
+    headers:
+      Authorization: "Bearer your-token-here"
 
 # Правила маршрутизации (fan-out: лог идёт во все совпавшие правила).
 # Если ни одно правило не совпало — срабатывает default.
@@ -31,7 +38,7 @@ routes:
     match:
       service: "auth-service"
       level: "error"
-    sinks: [file, webhook]
+    sinks: [file]
 
   - name: "payment-errors"
     match:
@@ -53,4 +60,5 @@ routes:
   - name: "default"
     match: {}           # совпадает со всем, что не попало ни в одно правило
     sinks: [file, stdout]
+
 

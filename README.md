@@ -105,16 +105,19 @@ log-aggregator/
 Файл: `configs/config.yaml`
 
 ```yaml
+app:
+  log_level: "info"     # уровень логирования агрегатора: debug, info, warn, error
+
 server:
-  port: 8080
+  port: 8080            # порт HTTP-сервера (1..65535)
   read_timeout: 10s
   write_timeout: 10s
   default_query_limit: 100 # число логов по умолчанию для GET /api/v1/logs
   max_query_limit: 1000    # максимальный limit для GET /api/v1/logs
 
 worker:
-  pool_size: 4        # число параллельных воркеров
-  buffer_size: 1024   # размер внутреннего канала
+  pool_size: 4        # число параллельных воркеров (1..256)
+  buffer_size: 1024   # размер внутреннего канала (1..1 000 000)
 
 storage:
   memory_limit: 5000  # последних N логов в памяти для API (10..100 000)
@@ -122,20 +125,25 @@ storage:
 sinks:
   stdout:
     enabled: true
+    format: "json"    # формат вывода: "json" или "text"
   file:
     enabled: true
-    dir: "./logs"     # файлы вида 2026-09-12.jsonl
+    dir: "./logs"     # директория для сохранения файлов логов
+    pattern: "flat"   # flat (YYYY-MM-DD.jsonl), by-service (service/YYYY-MM-DD.jsonl), by-date (YYYY-MM-DD/service.jsonl)
   webhook:
     enabled: false
     url: "http://localhost:9000/webhook"
     timeout: 5s
+    retry_count: 3    # число повторных попыток при сбоях
+    headers:
+      Authorization: "Bearer your-token"
 
 routes:
   - name: "auth-errors"
     match:
       service: "auth-service"
       level: "error"
-    sinks: [file, webhook]
+    sinks: [file]
 
   - name: "warn-and-above"
     match:

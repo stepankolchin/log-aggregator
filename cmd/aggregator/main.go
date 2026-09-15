@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -35,7 +36,7 @@ func main() {
 	cfgPath := flag.String("config", "configs/config.yaml", "путь к файлу конфигурации")
 	flag.Parse()
 
-	// Структурированное логирование самого сервиса (отдельно от логов микросервисов)
+	// Временный логгер до загрузки конфига
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	})))
@@ -46,30 +47,47 @@ func main() {
 		slog.Error("не удалось загрузить конфиг", "err", err)
 		os.Exit(1)
 	}
-	slog.Info("конфиг загружен", "path", *cfgPath)
+
+	// Настройка уровня логирования aggregator'а в соответствии с конфигом
+	var appLogLevel slog.Level
+	switch strings.ToLower(cfg.App.LogLevel) {
+	case "debug":
+		appLogLevel = slog.LevelDebug
+	case "warn", "warning":
+		appLogLevel = slog.LevelWarn
+	case "error":
+		appLogLevel = slog.LevelError
+	default:
+		appLogLevel = slog.LevelInfo
+	}
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		Level: appLogLevel,
+	})))
+
+	slog.Info("конфиг загружен", "path", *cfgPath, "log_level", cfg.App.LogLevel)
 
 	// ── Инициализация синков ──────────────────────────────────────────────────
 	var sinks []router.Sink
 
 	if cfg.Sinks.Stdout.Enabled {
-		sinks = append(sinks, sink.NewStdout())
-		slog.Info("sink: stdout включён")
+		sinks = append(sinks, sink.NewStdout(cfg.Sinks.Stdout.Format))
+		slog.Info("sink: stdout включён", "format", cfg.Sinks.Stdout.Format)
 	}
 
 	var fileSink *sink.File
 	if cfg.Sinks.File.Enabled {
-		fileSink, err = sink.NewFile(cfg.Sinks.File.Dir)
+		fileSink, err = sink.NewFile(cfg.Sinks.File.Dir, cfg.Sinks.File.Pattern)
 		if err != nil {
 			slog.Error("sink: ошибка инициализации file", "err", err)
 			os.Exit(1)
 		}
 		sinks = append(sinks, fileSink)
-		slog.Info("sink: file включён", "dir", cfg.Sinks.File.Dir)
+		slog.Info("sink: file включён", "dir", cfg.Sinks.File.Dir, "pattern", cfg.Sinks.File.Pattern)
 	}
 
 	if cfg.Sinks.Webhook.Enabled {
-		sinks = append(sinks, sink.NewWebhook(cfg.Sinks.Webhook.URL, cfg.Sinks.Webhook.Timeout))
-		slog.Info("sink: webhook включён", "url", cfg.Sinks.Webhook.URL)
+		sinks = append(sinks, sink.NewWebhook(cfg.Sinks.Webhook.URL, cfg.Sinks.Webhook.Timeout, cfg.Sinks.Webhook.RetryCount, cfg.Sinks.Webhook.Headers))
+		slog.Info("sink: webhook включён", "url", cfg.Sinks.Webhook.URL, "retry_count", cfg.Sinks.Webhook.RetryCount)
 	}
 
 	// ── Роутер ───────────────────────────────────────────────────────────────

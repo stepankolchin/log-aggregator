@@ -32,46 +32,57 @@ func QueryArchive(logDir string, p QueryParams) ([]model.LogEntry, bool, error) 
 		offset = 0
 	}
 
-	files, err := os.ReadDir(logDir)
-	if os.IsNotExist(err) {
-		return nil, false, nil
-	}
-	if err != nil {
-		return nil, false, fmt.Errorf("чтение директории логов %q: %w", logDir, err)
-	}
-
-	// Отбираем файлы с именами формата YYYY-MM-DD.jsonl
 	type dayFile struct {
-		name string
+		path string
 		date time.Time
 	}
 	var matchedFiles []dayFile
 
-	for _, f := range files {
-		if f.IsDir() || !strings.HasSuffix(f.Name(), ".jsonl") {
-			continue
-		}
-		base := strings.TrimSuffix(f.Name(), ".jsonl")
-		d, err := time.Parse("2006-01-02", base)
+	err := filepath.WalkDir(logDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
-			continue
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		if d.IsDir() || !strings.HasSuffix(d.Name(), ".jsonl") {
+			return nil
+		}
+		base := strings.TrimSuffix(d.Name(), ".jsonl")
+		parent := filepath.Base(filepath.Dir(path))
+
+		// Пробуем распарсить дату либо из имени файла (flat, by-service),
+		// либо из имени родительской папки (by-date)
+		dTime, err := time.Parse("2006-01-02", base)
+		if err != nil {
+			dTime, err = time.Parse("2006-01-02", parent)
+			if err != nil {
+				return nil
+			}
 		}
 
 		// Фильтр по диапазону дат
 		if !p.From.IsZero() {
 			fromDay := time.Date(p.From.Year(), p.From.Month(), p.From.Day(), 0, 0, 0, 0, time.UTC)
-			if d.Before(fromDay) {
-				continue
+			if dTime.Before(fromDay) {
+				return nil
 			}
 		}
 		if !p.To.IsZero() {
 			toDay := time.Date(p.To.Year(), p.To.Month(), p.To.Day(), 23, 59, 59, 999999999, time.UTC)
-			if d.After(toDay) {
-				continue
+			if dTime.After(toDay) {
+				return nil
 			}
 		}
 
-		matchedFiles = append(matchedFiles, dayFile{name: f.Name(), date: d})
+		matchedFiles = append(matchedFiles, dayFile{path: path, date: dTime})
+		return nil
+	})
+	if os.IsNotExist(err) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("чтение директории логов %q: %w", logDir, err)
 	}
 
 	// Сортируем файлы по дате убывания (самые свежие дни первыми)
@@ -86,8 +97,7 @@ func QueryArchive(logDir string, p QueryParams) ([]model.LogEntry, bool, error) 
 
 	// Обходим файлы день за днем от новых к старым
 	for _, df := range matchedFiles {
-		filePath := filepath.Join(logDir, df.name)
-		entries, err := readDayFile(filePath)
+		entries, err := readDayFile(df.path)
 		if err != nil {
 			continue
 		}

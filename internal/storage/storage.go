@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -186,39 +187,61 @@ func (s *Storage) GetStats() Stats {
 	}
 }
 
-// LoadFromFile загружает последние записи из файла логов текущего дня.
+// LoadFromFile загружает последние записи из файлов логов текущего дня (поддерживает flat, by-service, by-date).
 // Вызывается при старте для восстановления данных после перезапуска.
 func (s *Storage) LoadFromFile(logDir string) error {
 	today := time.Now().Format("2006-01-02")
-	path := filepath.Join(logDir, today+".jsonl")
 
-	f, err := os.Open(path)
-	if os.IsNotExist(err) {
-		return nil // файла ещё нет — нормальная ситуация при первом запуске
+	var todayFiles []string
+	err := filepath.WalkDir(logDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		if d.IsDir() || !strings.HasSuffix(d.Name(), ".jsonl") {
+			return nil
+		}
+		base := strings.TrimSuffix(d.Name(), ".jsonl")
+		parent := filepath.Base(filepath.Dir(path))
+		if base == today || parent == today {
+			todayFiles = append(todayFiles, path)
+		}
+		return nil
+	})
+	if os.IsNotExist(err) || len(todayFiles) == 0 {
+		return nil
 	}
 	if err != nil {
 		return err
 	}
-	defer f.Close()
 
 	var entries []model.LogEntry
-	scanner := bufio.NewScanner(f)
-	// Увеличиваем буфер — строки могут быть длинными из-за поля fields
-	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
-
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(line) == 0 {
+	for _, path := range todayFiles {
+		f, err := os.Open(path)
+		if err != nil {
 			continue
 		}
-		var e model.LogEntry
-		if json.Unmarshal(line, &e) == nil {
-			entries = append(entries, e)
+		scanner := bufio.NewScanner(f)
+		scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+		for scanner.Scan() {
+			line := scanner.Bytes()
+			if len(line) == 0 {
+				continue
+			}
+			var e model.LogEntry
+			if json.Unmarshal(line, &e) == nil {
+				entries = append(entries, e)
+			}
 		}
+		_ = f.Close()
 	}
-	if err := scanner.Err(); err != nil {
-		return err
-	}
+
+	// Сортируем записи по эффективному времени хронологически
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].EffectiveTime().Before(entries[j].EffectiveTime())
+	})
 
 	// Берём только последние limit записей
 	if len(entries) > s.limit {
