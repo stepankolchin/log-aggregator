@@ -106,13 +106,15 @@ server:
   port: 8080
   read_timeout: 10s
   write_timeout: 10s
+  default_query_limit: 100 # число логов по умолчанию для GET /api/v1/logs
+  max_query_limit: 1000    # максимальный limit для GET /api/v1/logs
 
 worker:
   pool_size: 4        # число параллельных воркеров
   buffer_size: 1024   # размер внутреннего канала
 
 storage:
-  memory_limit: 5000  # последних N логов в памяти для API
+  memory_limit: 5000  # последних N логов в памяти для API (10..1 000 000)
 
 sinks:
   stdout:
@@ -139,8 +141,14 @@ routes:
 
   - name: "default"
     match: {}           # срабатывает, если ни одно правило не совпало
-    sinks: [stdout]
+    sinks: [file, stdout] # по умолчанию сохраняет в файл и выводит в stdout
 ```
+
+> **Гарантии сохранения и восстановления данных:**
+> - `storage` хранит кольцевой буфер последних `storage.memory_limit` записей в оперативной памяти для быстрого поиска и Web UI.
+> - При перезапуске агрегатор восстанавливает данные за текущую дату из директории файлового синка (`sinks.file.dir`).
+> - Правило `default` из коробки направляет логи в `[file, stdout]`, гарантируя отсутствие потерь при перезапуске. Логи, явно исключённые правилами маршрутизации из синка `file` (например, направленные только в `discard` или `webhook`), доступны в API только во время текущей сессии процесса.
+
 
 ### Правила маршрутизации
 
@@ -357,6 +365,23 @@ slog.Info("msg", "key", val)
 // Отправлять все уровни включая debug:
 handler := aggregatorslog.New(url, "svc").WithMinLevel(slog.LevelDebug)
 
+// По умолчанию при сбоях сети/503/422 логи автоматически дублируются в os.Stderr (fallback).
+// Можно задать свой fallback (например, в файл) или отключить его:
+handler := aggregatorslog.New(url, "svc").WithFallback(slog.NewJSONHandler(file, nil))
+// или: handler := aggregatorslog.New(url, "svc").WithoutFallback()
+
+// Отдельный обработчик ошибок доставки (для Sentry/алертов):
+handler := aggregatorslog.New(url, "svc").
+    WithErrorHandler(func(err error, r slog.Record) {
+        fmt.Fprintf(os.Stderr, "ошибка доставки в aggregator: %v\n", err)
+    })
+
+// Счётчики успешных отправок, ошибок и реальных потерь:
+// - sent: успешно ушло в aggregator
+// - errors: сбои обращения к aggregator (сохранены через fallback)
+// - dropped: потеряно насовсем (если fallback был отключен или упал)
+sent, errors, dropped := handler.Stats()
+
 // Добавить постоянные поля к каждому логу:
 logger := slog.New(handler.WithAttrs([]slog.Attr{
     slog.String("component", "payment"),
@@ -364,3 +389,4 @@ logger := slog.New(handler.WithAttrs([]slog.Attr{
 }))
 logger.Info("started") // → fields: {"component":"payment","version":"1.2.0"}
 ```
+

@@ -52,4 +52,5 @@ routes:
 
   - name: "default"
     match: {}           # совпадает со всем, что не попало ни в одно правило
-    sinks: [stdout]
+    sinks: [file, stdout]
+
