@@ -1,38 +1,24 @@
-name: EthicalCheck-Workflow
-
+name: OWASP ZAP API Scan
 on:
-  push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
+  workflow_dispatch:
   schedule:
-    - cron: '33 14 * * 0'
-  workflow_dispatch:      # Кнопка ручного запуска в Actions
-
-permissions:
-  contents: read
-
+    - cron: '0 0 * * 0'
 jobs:
-  Trigger_EthicalCheck:
-    permissions:
-      security-events: write
-      actions: read
-      contents: read
+  zap_scan:
     runs-on: ubuntu-latest
-
     steps:
-       - name: Checkout repository
-         uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-       - name: EthicalCheck Free & Automated API Security Testing Service
-         uses: apisec-inc/ethicalcheck-action@005fac321dd843682b1af6b72f30caaf9952c641
-         with:
-          oas-url: "./docs/openapi.yaml"
-          email: "step4in@gmail.com"
-          sarif-result-file: "ethicalcheck-results.sarif"
-
-       - name: Upload sarif file to repository
-         uses: github/codeql-action/upload-sarif@v3
-         if: always()
-         with:
-          sarif_file: ./ethicalcheck-results.sarif
+      - name: Start Log Aggregator
+        run: |
+          go run ./cmd/aggregator &
+          sleep 5
+          
+      - name: ZAP Scan
+        uses: zaproxy/action-api-scan@v0.9.0
+        with:
+          target: 'http://localhost:8080'
+          format: openapi
+          schema: './docs/openapi.yaml'
+          fail_action: false
