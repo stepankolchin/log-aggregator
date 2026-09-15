@@ -21,7 +21,8 @@ func TestQueryArchive_PaginationAndFilters(t *testing.T) {
 	ctx := context.Background()
 
 	// Записываем 15 логов
-	baseTime := time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC)
+	now := time.Now()
+	baseTime := time.Date(now.Year(), now.Month(), now.Day(), 12, 0, 0, 0, time.UTC)
 	for i := 1; i <= 15; i++ {
 		svc := "auth"
 		if i%2 == 0 {
