@@ -1,0 +1,38 @@
+name: EthicalCheck-Workflow
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  schedule:
+    - cron: '33 14 * * 0'
+  workflow_dispatch:      # Кнопка ручного запуска в Actions
+
+permissions:
+  contents: read
+
+jobs:
+  Trigger_EthicalCheck:
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+    runs-on: ubuntu-latest
+
+    steps:
+       - name: Checkout repository
+         uses: actions/checkout@v4
+
+       - name: EthicalCheck Free & Automated API Security Testing Service
+         uses: apisec-inc/ethicalcheck-action@005fac321dd843682b1af6b72f30caaf9952c641
+         with:
+          oas-url: "./docs/openapi.yaml"
+          email: "step4in@gmail.com"
+          sarif-result-file: "ethicalcheck-results.sarif"
+
+       - name: Upload sarif file to repository
+         uses: github/codeql-action/upload-sarif@v3
+         if: always()
+         with:
+          sarif_file: ./ethicalcheck-results.sarif
