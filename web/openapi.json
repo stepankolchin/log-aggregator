@@ -1,0 +1,930 @@
+{
+  "components": {
+    "schemas": {
+      "BatchItemError": {
+        "properties": {
+          "error": {
+            "description": "Человекочитаемое описание причины отказа",
+            "example": "очередь переполнена, повторите попытку позже",
+            "type": "string"
+          },
+          "index": {
+            "description": "Порядковый номер (0-based) записи в исходном массиве logs",
+            "example": 2,
+            "type": "integer"
+          },
+          "retryable": {
+            "description": "true если отказ временный (queue_full) и клиент может повторить отправку без изменений",
+            "example": true,
+            "type": "boolean"
+          },
+          "status": {
+            "description": "Категория сбоя (validation_error или queue_full)",
+            "enum": [
+              "validation_error",
+              "queue_full"
+            ],
+            "example": "queue_full",
+            "type": "string"
+          }
+        },
+        "required": [
+          "index",
+          "status",
+          "error",
+          "retryable"
+        ],
+        "type": "object"
+      },
+      "BatchRequest": {
+        "properties": {
+          "logs": {
+            "description": "Непустой массив записей логов",
+            "items": {
+              "$ref": "#/components/schemas/LogEntry"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "logs"
+        ],
+        "type": "object"
+      },
+      "BatchResponse": {
+        "properties": {
+          "accepted": {
+            "description": "Количество успешно принятых в очередь записей",
+            "example": 10,
+            "type": "integer"
+          },
+          "dropped": {
+            "description": "Количество отброшенных записей из-за переполнения очереди",
+            "example": 0,
+            "type": "integer"
+          },
+          "errors": {
+            "description": "Количество записей с ошибками валидации структуры",
+            "example": 0,
+            "type": "integer"
+          },
+          "failed": {
+            "description": "Список деталей по всем непринятым элементам (присутствует при dropped \u003e 0 или errors \u003e 0)",
+            "items": {
+              "$ref": "#/components/schemas/BatchItemError"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "accepted",
+          "dropped",
+          "errors"
+        ],
+        "type": "object"
+      },
+      "ErrorResponse": {
+        "properties": {
+          "error": {
+            "description": "Описание возникшей ошибки",
+            "example": "отсутствует поле service",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "HealthResponse": {
+        "properties": {
+          "status": {
+            "example": "ok",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "type": "object"
+      },
+      "LogEntry": {
+        "properties": {
+          "fields": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Дополнительные контекстные атрибуты ключ-значение",
+            "example": {
+              "duration_ms": "3050",
+              "path": "/api/login",
+              "user_id": "42"
+            },
+            "type": "object"
+          },
+          "host": {
+            "description": "Имя хоста или пода, сгенерировавшего лог",
+            "example": "auth-pod-7f98b",
+            "type": "string"
+          },
+          "level": {
+            "description": "Уровень важности сообщения (debug, info, warn, error)",
+            "enum": [
+              "debug",
+              "info",
+              "warn",
+              "error"
+            ],
+            "example": "error",
+            "type": "string"
+          },
+          "message": {
+            "description": "Текст сообщения лога",
+            "example": "database connection timeout after 3000ms",
+            "type": "string"
+          },
+          "server_timestamp": {
+            "description": "Время приёма и регистрации лога сервером агрегатора (заполняется автоматически)",
+            "example": "2026-09-15T21:00:00.123456Z",
+            "format": "date-time",
+            "readOnly": true,
+            "type": "string"
+          },
+          "service": {
+            "description": "Идентификатор сервиса-источника",
+            "example": "auth-service",
+            "type": "string"
+          },
+          "timestamp": {
+            "description": "Время возникновения события на клиенте (опционально)",
+            "example": "2026-09-15T21:00:00Z",
+            "format": "date-time",
+            "type": "string"
+          },
+          "trace_id": {
+            "description": "Идентификатор распределённого трейса",
+            "example": "a1b2c3d4e5f6",
+            "type": "string"
+          }
+        },
+        "required": [
+          "service",
+          "level",
+          "message"
+        ],
+        "type": "object"
+      },
+      "MatchConfig": {
+        "properties": {
+          "level": {
+            "description": "Фильтр по одному уровню",
+            "example": "error",
+            "type": "string"
+          },
+          "levels": {
+            "description": "Фильтр по списку уровней",
+            "example": [
+              "warn",
+              "error"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "message_regex": {
+            "description": "Регулярное выражение для сопоставления с текстом сообщения",
+            "example": "^auth:.*failed$",
+            "type": "string"
+          },
+          "service": {
+            "description": "Фильтр по точному имени сервиса",
+            "example": "auth-service",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ReadyResponse": {
+        "properties": {
+          "reason": {
+            "description": "Причина неготовности (присутствует при статусе not_ready)",
+            "example": "сервер выключается или не готов к приёму запросов",
+            "type": "string"
+          },
+          "status": {
+            "example": "ready",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "type": "object"
+      },
+      "RouteRule": {
+        "properties": {
+          "match": {
+            "$ref": "#/components/schemas/MatchConfig"
+          },
+          "name": {
+            "description": "Уникальное имя правила",
+            "example": "auth-errors",
+            "type": "string"
+          },
+          "sinks": {
+            "description": "Список назначений для логов, подпадающих под правило",
+            "example": [
+              "file",
+              "stdout"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "match",
+          "sinks"
+        ],
+        "type": "object"
+      },
+      "StatsResponse": {
+        "properties": {
+          "accepted": {
+            "description": "Суммарное число успешно принятых логов",
+            "example": 1240,
+            "type": "integer"
+          },
+          "by_level": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Распределение количества логов по уровням",
+            "example": {
+              "debug": 400,
+              "error": 80,
+              "info": 600,
+              "warn": 160
+            },
+            "type": "object"
+          },
+          "by_service": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Распределение количества логов по сервисам",
+            "example": {
+              "auth-service": 410,
+              "order-service": 430,
+              "payment-service": 400
+            },
+            "type": "object"
+          },
+          "dropped": {
+            "description": "Суммарное число отброшенных логов (переполнение очереди)",
+            "example": 3,
+            "type": "integer"
+          },
+          "errors": {
+            "description": "Суммарное число ошибок валидации/HTTP",
+            "example": 1,
+            "type": "integer"
+          },
+          "in_memory": {
+            "description": "Число логов в оперативном буфере",
+            "example": 1240,
+            "type": "integer"
+          },
+          "total_stored": {
+            "description": "Общее число сохранённых логов в хранилище",
+            "example": 1240,
+            "type": "integer"
+          },
+          "uptime": {
+            "description": "Время непрерывной работы процесса",
+            "example": "5h 23m 15s",
+            "type": "string"
+          }
+        },
+        "required": [
+          "uptime",
+          "accepted",
+          "dropped",
+          "errors",
+          "total_stored",
+          "in_memory",
+          "by_service",
+          "by_level"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "contact": {
+      "name": "Log Aggregator Team"
+    },
+    "description": "Высокопроизводительная система приёма, валидации, маршрутизации и хранения структурированных логов от микросервисов.\n\n### Основные возможности\n- **Приём логов**: одиночный (`POST /api/v1/logs`) и пакетный (`POST /api/v1/logs/batch`).\n- **Пакетная обработка**: подробный отчет об обработке записей с флагом `retryable` для выборочной повторной отправки.\n- **Выборка и фильтрация**: фильтрация по сервису, уровню, подстроке, временному диапазону (RAM-буфер или файловый архив).\n- **Метрики и роутинг**: статистика в реальном времени (`/api/v1/stats`) и активные правила маршрутизации (`/api/v1/routes`).\n- **Healthcheck**: liveness (`/healthz`) и readiness (`/readyz`) пробы.\n",
+    "title": "Log Aggregator API",
+    "version": "1.0.0"
+  },
+  "openapi": "3.0.3",
+  "paths": {
+    "/api/v1/logs": {
+      "get": {
+        "description": "Возвращает список записей логов, удовлетворяющих заданным критериям фильтрации.\n\n**Источники данных:**\n- `source=memory` (по умолчанию, если не указаны даты): быстрый кольцевой буфер в оперативной памяти.\n- `source=file` или `source=archive` (или при указании параметров `from`/`to`): дисковый архив JSON Lines файлов.\n\n**Заголовки ответа для пагинации:**\n- `X-Limit`: применённый размер страницы\n- `X-Offset`: текущее смещение\n- `X-Has-More`: `true`, если доступны следующие записи\n",
+        "operationId": "queryLogs",
+        "parameters": [
+          {
+            "description": "Точное имя сервиса для фильтрации",
+            "example": "auth-service",
+            "in": "query",
+            "name": "service",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Уровень логирования",
+            "example": "error",
+            "in": "query",
+            "name": "level",
+            "required": false,
+            "schema": {
+              "enum": [
+                "debug",
+                "info",
+                "warn",
+                "error"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Подстрока для поиска внутри поля message (регистронезависимо)",
+            "example": "database connection",
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Начало временного интервала (RFC3339 или YYYY-MM-DD[ HH:MM:SS])",
+            "example": "2026-09-15T00:00:00Z",
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Конец временного интервала (RFC3339 или YYYY-MM-DD[ HH:MM:SS])",
+            "example": "2026-09-15T23:59:59Z",
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Максимальное количество записей в ответе (по умолчанию из server.default_query_limit, максимум server.max_query_limit)",
+            "example": 50,
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Количество пропускаемых записей от начала выборки",
+            "example": 0,
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Источник данных (\"memory\" — оперативная память, \"file\" / \"archive\" — дисковый архив)",
+            "example": "memory",
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "enum": [
+                "memory",
+                "file",
+                "archive"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/LogEntry"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Массив найденных записей логов",
+            "headers": {
+              "X-Has-More": {
+                "description": "Флаг наличия следующих страниц",
+                "schema": {
+                  "type": "boolean"
+                }
+              },
+              "X-Limit": {
+                "description": "Применённый лимит записей",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-Offset": {
+                "description": "Смещение выборки",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": "параметр limit (5000) превышает допустимый максимум (1000)"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Некорректные параметры запроса (отрицательный offset, limit превышает максимум, неверный формат даты)"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Ошибка чтения дискового архива"
+          }
+        },
+        "summary": "Поиск и фильтрация логов",
+        "tags": [
+          "Logs"
+        ]
+      },
+      "post": {
+        "description": "Принимает одну запись лога, выполняет валидацию обязательных полей (`service`, `level`, `message`),\nнормализует уровень логирования и помещает запись в неблокирующую очередь обработки.\n\n**Нормализация уровней:**\n- `trace`, `verbose`, `debug` → `debug`\n- `info`, `information` → `info`\n- `warn`, `warning` → `warn`\n- `err`, `error`, `fatal`, `critical`, `panic` → `error`\n",
+        "operationId": "ingestSingleLog",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "fields": {
+                  "ip": "192.168.1.15",
+                  "user_id": "1042"
+                },
+                "host": "auth-node-1",
+                "level": "error",
+                "message": "invalid credentials provided",
+                "service": "auth-service",
+                "trace_id": "req-98765-xyz"
+              },
+              "schema": {
+                "$ref": "#/components/schemas/LogEntry"
+              }
+            }
+          },
+          "description": "Объект записи лога",
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "status": {
+                      "example": "accepted",
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Запись успешно принята во внутреннюю очередь"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": "неверный JSON: unexpected end of JSON input"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Некорректный синтаксис JSON"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": "отсутствует поле service"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Ошибка валидации структуры (отсутствуют обязательные поля или недопустимый уровень)"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": "очередь переполнена, попробуйте позже"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Внутренняя очередь переполнена (backpressure). Клиенту рекомендуется повторить запрос позже"
+          }
+        },
+        "summary": "Приём одиночного лога",
+        "tags": [
+          "Ingest"
+        ]
+      }
+    },
+    "/api/v1/logs/batch": {
+      "post": {
+        "description": "Принимает массив записей логов. Обрабатывает каждый элемент независимо, выполняя валидацию и постановку в очередь.\n\n### Семантика кодов ответа и частичного приёма:\n- **`202 Accepted`**: Успешный приём (полный или частичный, `accepted \u003e 0`). Если часть элементов была отклонена, они перечисляются в массиве `failed` с индексом, статусом и признаком `retryable`.\n- **`422 Unprocessable Entity`**: Полный отказ (`accepted == 0`), вызванный ошибками валидации записей (`retryable: false`). Клиент не должен повторять отправку без исправления записей.\n- **`503 Service Unavailable`**: Полный отказ (`accepted == 0`), вызванный исключительно переполнением очереди сервера (`retryable: true`). Клиент может повторить отправку батча позже с exponential backoff.\n- **`400 Bad Request`**: Синтаксическая ошибка JSON или передан пустой массив `logs`.\n",
+        "operationId": "ingestBatchLogs",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "logs": [
+                  {
+                    "level": "info",
+                    "message": "order",
+                    "service": "order-service",
+                    "trace_id": "req-abc-1"
+                  },
+                  {
+                    "level": "warn",
+                    "message": "payment gateway response delayed",
+                    "service": "order-service",
+                    "trace_id": "req-abc-2"
+                  },
+                  {
+                    "level": "error",
+                    "message": "broken record missing service name",
+                    "service": ""
+                  }
+                ]
+              },
+              "schema": {
+                "$ref": "#/components/schemas/BatchRequest"
+              }
+            }
+          },
+          "description": "Пакет записей логов",
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "full_success": {
+                    "summary": "Полный успех (все записи приняты)",
+                    "value": {
+                      "accepted": 2,
+                      "dropped": 0,
+                      "errors": 0
+                    }
+                  },
+                  "partial_success": {
+                    "summary": "Частичный успех (с деталями отклонённых записей)",
+                    "value": {
+                      "accepted": 1,
+                      "dropped": 1,
+                      "errors": 1,
+                      "failed": [
+                        {
+                          "error": "очередь переполнена, повторите попытку позже",
+                          "index": 1,
+                          "retryable": true,
+                          "status": "queue_full"
+                        },
+                        {
+                          "error": "отсутствует поле service",
+                          "index": 2,
+                          "retryable": false,
+                          "status": "validation_error"
+                        }
+                      ]
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/BatchResponse"
+                }
+              }
+            },
+            "description": "Пакет принят полностью или частично (accepted \u003e 0)"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": "батч пустой"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Неверный JSON или пустой массив логов"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "accepted": 0,
+                  "dropped": 0,
+                  "errors": 1,
+                  "failed": [
+                    {
+                      "error": "отсутствует поле service",
+                      "index": 0,
+                      "retryable": false,
+                      "status": "validation_error"
+                    }
+                  ]
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/BatchResponse"
+                }
+              }
+            },
+            "description": "Полный отказ из-за ошибок валидации (accepted == 0 \u0026\u0026 errors \u003e 0)"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "accepted": 0,
+                  "dropped": 2,
+                  "errors": 0,
+                  "failed": [
+                    {
+                      "error": "очередь переполнена, повторите попытку позже",
+                      "index": 0,
+                      "retryable": true,
+                      "status": "queue_full"
+                    },
+                    {
+                      "error": "очередь переполнена, повторите попытку позже",
+                      "index": 1,
+                      "retryable": true,
+                      "status": "queue_full"
+                    }
+                  ]
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/BatchResponse"
+                }
+              }
+            },
+            "description": "Полный отказ из-за переполнения очереди сервера (accepted == 0 \u0026\u0026 dropped \u003e 0)"
+          }
+        },
+        "summary": "Пакетный приём логов (Batch Ingest)",
+        "tags": [
+          "Ingest"
+        ]
+      }
+    },
+    "/api/v1/routes": {
+      "get": {
+        "description": "Возвращает список сконфигурированных правил fan-out маршрутизации логов.",
+        "operationId": "getRoutes",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": [
+                  {
+                    "match": {
+                      "level": "error",
+                      "service": "auth-service"
+                    },
+                    "name": "auth-errors",
+                    "sinks": [
+                      "file"
+                    ]
+                  },
+                  {
+                    "match": {
+                      "levels": [
+                        "warn",
+                        "error"
+                      ]
+                    },
+                    "name": "warn-and-above",
+                    "sinks": [
+                      "stdout"
+                    ]
+                  },
+                  {
+                    "match": {},
+                    "name": "default",
+                    "sinks": [
+                      "file",
+                      "stdout"
+                    ]
+                  }
+                ],
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RouteRule"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Список активных правил маршрутизации"
+          }
+        },
+        "summary": "Список активных правил маршрутизации",
+        "tags": [
+          "Routing"
+        ]
+      }
+    },
+    "/api/v1/stats": {
+      "get": {
+        "description": "Возвращает агрегированные счетчики:\n- Аптайм сервиса в читаемом виде\n- Число принятых, отброшенных и ошибочных запросов\n- Общее количество сохраненных логов и логов в горячем буфере RAM\n- Распределение логов по сервисам и уровням важности\n",
+        "operationId": "getStats",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "accepted": 1240,
+                  "by_level": {
+                    "debug": 400,
+                    "error": 80,
+                    "info": 600,
+                    "warn": 160
+                  },
+                  "by_service": {
+                    "auth-service": 410,
+                    "order-service": 430,
+                    "payment-service": 400
+                  },
+                  "dropped": 3,
+                  "errors": 1,
+                  "in_memory": 1240,
+                  "total_stored": 1240,
+                  "uptime": "5h 23m 15s"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/StatsResponse"
+                }
+              }
+            },
+            "description": "Текущая статистика агрегатора"
+          }
+        },
+        "summary": "Метрики и системная статистика",
+        "tags": [
+          "Stats"
+        ]
+      }
+    },
+    "/healthz": {
+      "get": {
+        "description": "Всегда возвращает HTTP 200, сигнализируя, что HTTP-сервер активен и обрабатывает запросы.",
+        "operationId": "checkHealth",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "status": "ok"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            },
+            "description": "Процесс функционирует"
+          }
+        },
+        "summary": "Liveness-проба (проверка жизнеспособности процесса)",
+        "tags": [
+          "Probes"
+        ]
+      }
+    },
+    "/readyz": {
+      "get": {
+        "description": "Проверяет готовность агрегатора к обслуживанию нагрузки:\n- Процесс не находится в состоянии graceful shutdown.\n- Инициализированы компоненты буфера памяти и хендлеров приёма.\n",
+        "operationId": "checkReady",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "status": "ready"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ReadyResponse"
+                }
+              }
+            },
+            "description": "Сервер готов к приёму запросов"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "reason": "сервер выключается или не готов к приёму запросов",
+                  "status": "not_ready"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ReadyResponse"
+                }
+              }
+            },
+            "description": "Сервер не готов или находится в процессе остановки"
+          }
+        },
+        "summary": "Readiness-проба (проверка готовности принимать входящий трафик)",
+        "tags": [
+          "Probes"
+        ]
+      }
+    }
+  },
+  "servers": [
+    {
+      "description": "Локальный сервер разработки",
+      "url": "http://localhost:8080"
+    }
+  ],
+  "tags": [
+    {
+      "description": "Эндпоинты приёма логов от микросервисов",
+      "name": "Ingest"
+    },
+    {
+      "description": "Поиск, фильтрация и просмотр логов",
+      "name": "Logs"
+    },
+    {
+      "description": "Метрики и системная статистика",
+      "name": "Stats"
+    },
+    {
+      "description": "Правила маршрутизации логов",
+      "name": "Routing"
+    },
+    {
+      "description": "Проверки работоспособности и готовности сервиса",
+      "name": "Probes"
+    }
+  ]
+}

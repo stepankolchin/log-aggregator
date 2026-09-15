@@ -51,6 +51,26 @@ header {
   font-weight: 400;
 }
 
+.docs-link {
+  display: inline-flex;
+  align-items: center;
+  background: var(--surface2);
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  text-decoration: none;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+
+.docs-link:hover {
+  color: var(--text);
+  border-color: var(--accent);
+  background: #1e293b;
+}
+
 .refresh-chip {
   display: flex;
   align-items: center;

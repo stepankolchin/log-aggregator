@@ -260,6 +260,15 @@ docker compose logs -f auth-service
 
 ## API
 
+### Документация OpenAPI / Swagger UI
+
+Интерактивная документация и формальная спецификация API доступны прямо из работающего сервера:
+- **Swagger UI (веб-интерфейс)**: [http://localhost:8080/docs](http://localhost:8080/docs) (или `/swagger`)
+- **Спецификация OpenAPI 3.0 (YAML)**: [http://localhost:8080/docs/openapi.yaml](http://localhost:8080/docs/openapi.yaml) (или `docs/openapi.yaml` в репозитории)
+- **Спецификация OpenAPI 3.0 (JSON)**: [http://localhost:8080/docs/openapi.json](http://localhost:8080/docs/openapi.json) (или `docs/openapi.json` в репозитории)
+
+---
+
 ### Приём логов
 
 ```bash
@@ -268,13 +277,45 @@ curl -X POST http://localhost:8080/api/v1/logs \
   -H "Content-Type: application/json" \
   -d '{"service":"auth-service","level":"error","message":"auth failed","trace_id":"abc"}'
 
-# Батч логов
+# Батч логов (POST /api/v1/logs/batch)
 curl -X POST http://localhost:8080/api/v1/logs/batch \
   -H "Content-Type: application/json" \
   -d '{"logs":[
     {"service":"order-service","level":"info","message":"order created"},
     {"service":"order-service","level":"warn","message":"processing slow"}
   ]}'
+```
+
+**Контракт и семантика batch-приёма (`POST /api/v1/logs/batch`):**
+
+| HTTP Статус | Условие | Описание |
+|---|---|---|
+| `202 Accepted` | `accepted > 0` | Полный или частичный успех. Записи приняты в очередь. При частичном успехе поле `failed` содержит список отклонённых элементов с признаком `retryable`. |
+| `422 Unprocessable Entity` | `accepted == 0 && errors > 0` | Полный отказ из-за ошибок валидации данных. Клиенту **не следует** повторять отправку без исправления записей (`retryable: false`). |
+| `503 Service Unavailable` | `accepted == 0 && dropped > 0` | Полный отказ из-за переполнения внутренней очереди сервера. Клиент **может** повторить отправку батча позже (`retryable: true`). |
+| `400 Bad Request` | — | Некорректный JSON или пустой массив `logs`. |
+
+**Пример ответа при частичном успехе (`202 Accepted`):**
+```json
+{
+  "accepted": 2,
+  "dropped": 1,
+  "errors": 1,
+  "failed": [
+    {
+      "index": 2,
+      "status": "validation_error",
+      "error": "валидация: поле service обязательно",
+      "retryable": false
+    },
+    {
+      "index": 3,
+      "status": "queue_full",
+      "error": "очередь переполнена, повторите попытку позже",
+      "retryable": true
+    }
+  ]
+}
 ```
 
 ### Просмотр логов
@@ -305,7 +346,7 @@ curl http://localhost:8080/readyz
 
 ```json
 {
-  "uptime": "5m30s",
+  "uptime": "5h 23m 15s",
   "accepted": 1240,
   "dropped": 3,
   "errors": 1,

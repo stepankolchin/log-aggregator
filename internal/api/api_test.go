@@ -619,3 +619,95 @@ func TestServer_Start_SuccessAndShutdown(t *testing.T) {
 		t.Fatalf("Shutdown failed: %v", err)
 	}
 }
+
+// TestSwaggerUIAndOpenAPI проверяет доступность Swagger UI и спецификаций OpenAPI 3.0.
+func TestSwaggerUIAndOpenAPI(t *testing.T) {
+	env := newTestEnv(t)
+
+	tests := []struct {
+		name        string
+		path        string
+		wantCode    int
+		contentType string
+		mustContain string
+	}{
+		{
+			name:        "Swagger UI (/docs)",
+			path:        "/docs",
+			wantCode:    http.StatusOK,
+			contentType: "text/html",
+			mustContain: "Swagger UI",
+		},
+		{
+			name:        "Swagger UI (/swagger)",
+			path:        "/swagger",
+			wantCode:    http.StatusOK,
+			contentType: "text/html",
+			mustContain: "Swagger UI",
+		},
+		{
+			name:        "OpenAPI YAML (/docs/openapi.yaml)",
+			path:        "/docs/openapi.yaml",
+			wantCode:    http.StatusOK,
+			contentType: "application/yaml",
+			mustContain: "openapi: 3.0.3",
+		},
+		{
+			name:        "OpenAPI YAML (/swagger/openapi.yaml)",
+			path:        "/swagger/openapi.yaml",
+			wantCode:    http.StatusOK,
+			contentType: "application/yaml",
+			mustContain: "openapi: 3.0.3",
+		},
+		{
+			name:        "OpenAPI JSON (/docs/openapi.json)",
+			path:        "/docs/openapi.json",
+			wantCode:    http.StatusOK,
+			contentType: "application/json",
+			mustContain: `"openapi": "3.0.3"`,
+		},
+		{
+			name:        "OpenAPI JSON (/swagger/openapi.json)",
+			path:        "/swagger/openapi.json",
+			wantCode:    http.StatusOK,
+			contentType: "application/json",
+			mustContain: `"openapi": "3.0.3"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp := get(t, env.server, tt.path)
+			defer resp.Body.Close()
+
+			if resp.StatusCode != tt.wantCode {
+				t.Fatalf("expected status %d, got %d", tt.wantCode, resp.StatusCode)
+			}
+
+			ct := resp.Header.Get("Content-Type")
+			if !strings.Contains(ct, tt.contentType) {
+				t.Errorf("expected Content-Type containing %q, got %q", tt.contentType, ct)
+			}
+
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				t.Fatalf("failed reading body: %v", err)
+			}
+
+			if !strings.Contains(string(body), tt.mustContain) {
+				t.Errorf("expected body to contain %q", tt.mustContain)
+			}
+
+			if tt.contentType == "application/json" {
+				var parsed map[string]any
+				if err := json.Unmarshal(body, &parsed); err != nil {
+					t.Fatalf("body is not valid JSON: %v", err)
+				}
+				if _, ok := parsed["openapi"]; !ok {
+					t.Errorf("expected 'openapi' key in parsed JSON")
+				}
+			}
+		})
+	}
+}
+

@@ -12,3 +12,12 @@ var StyleCSS []byte
 
 //go:embed app.js
 var AppJS []byte
+
+//go:embed swagger.html
+var SwaggerHTML []byte
+
+//go:embed openapi.yaml
+var OpenAPIYAML []byte
+
+//go:embed openapi.json
+var OpenAPIJSON []byte

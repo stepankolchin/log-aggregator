@@ -130,19 +130,34 @@ func main() {
 	// ── HTTP-сервер ───────────────────────────────────────────────────────────
 	handler := ingest.NewHandler(queue)
 	srv := api.New(cfg.Server, handler, stor, rtr, cfg.Sinks.File.Dir)
-	srv.Start()
+	if err := srv.Start(); err != nil {
+		slog.Error("не удалось запустить HTTP-сервер", "err", err)
+		// Очищаем ресурсы воркеров и файлового синка перед выходом
+		close(queue)
+		pool.Wait()
+		cancel()
+		if fileSink != nil {
+			_ = fileSink.Close()
+		}
+		os.Exit(1)
+	}
 
-	// ── Ожидание сигнала завершения ───────────────────────────────────────────
+	// ── Ожидание сигнала завершения или ошибки сервера ─────────────────────────
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	sig := <-sigCh
-	slog.Info("получен сигнал, начинаем graceful shutdown", "signal", sig)
+
+	select {
+	case sig := <-sigCh:
+		slog.Info("получен сигнал, начинаем graceful shutdown", "signal", sig)
+	case err := <-srv.Errors():
+		slog.Error("критическая ошибка HTTP-сервера, начинаем экстренное завершение", "err", err)
+	}
 
 	// ── Graceful shutdown (порядок важен) ────────────────────────────────────
 	shutCtx, shutCancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer shutCancel()
 
-	// 1. HTTP-сервер: прекращаем принимать новые запросы, ждём завершения текущих
+	// 1. HTTP-сервер: прекращаем принимать новые запросы (readyz -> 503), ждём завершения текущих
 	if err := srv.Shutdown(shutCtx); err != nil {
 		slog.Error("ошибка при завершении HTTP-сервера", "err", err)
 	}
@@ -155,7 +170,7 @@ func main() {
 	cancel()
 	slog.Info("воркеры завершены")
 
-	// 3. Файловый синк: сбрасываем буфер и закрываем файл
+	// 4. Файловый синк: сбрасываем буфер и закрываем файл
 	if fileSink != nil {
 		if err := fileSink.Close(); err != nil {
 			slog.Error("ошибка закрытия файлового синка", "err", err)
