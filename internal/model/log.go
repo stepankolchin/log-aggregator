@@ -45,3 +45,20 @@ func (e LogEntry) EffectiveTime() time.Time {
 type BatchRequest struct {
 	Logs []LogEntry `json:"logs"`
 }
+
+// BatchItemError описывает причину сбоя обработки отдельного элемента батча.
+type BatchItemError struct {
+	Index     int    `json:"index"`     // 0-based индекс записи в исходном массиве logs
+	Status    string `json:"status"`    // "validation_error" или "queue_full"
+	Error     string `json:"error"`     // текстовое описание причины отказа
+	Retryable bool   `json:"retryable"` // true, если клиент может повторить отправку элемента
+}
+
+// BatchResponse — структурированный ответ на батч-запрос POST /api/v1/logs/batch.
+type BatchResponse struct {
+	Accepted int              `json:"accepted"`         // число успешно принятых в очередь записей
+	Dropped  int              `json:"dropped"`          // число отброшенных записей (переполнение очереди)
+	Errors   int              `json:"errors"`           // число записей с ошибками валидации
+	Failed   []BatchItemError `json:"failed,omitempty"` // список ошибок по непринятым элементам для выборочного ретрая
+}
+

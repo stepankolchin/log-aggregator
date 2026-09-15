@@ -45,6 +45,11 @@ func (h *Handler) HandleSingle(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleBatch — POST /api/v1/logs/batch, принимает массив логов.
+// Контракт статусов:
+// - 202 Accepted: если хотя бы одна запись принята в очередь (accepted > 0, включая полный успех accepted == len(logs)).
+// - 422 Unprocessable Entity: если ни одна запись не принята (accepted == 0) из-за ошибок валидации.
+// - 503 Service Unavailable: если ни одна запись не принята (accepted == 0) из-за переполнения очереди.
+// - 400 Bad Request: если JSON невалиден или передан пустой массив logs.
 func (h *Handler) HandleBatch(w http.ResponseWriter, r *http.Request) {
 	var req model.BatchRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -58,9 +63,17 @@ func (h *Handler) HandleBatch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var accepted, dropped, errs int
+	var failed []model.BatchItemError
+
 	for i := range req.Logs {
 		if err := Validate(&req.Logs[i]); err != nil {
 			errs++
+			failed = append(failed, model.BatchItemError{
+				Index:     i,
+				Status:    "validation_error",
+				Error:     err.Error(),
+				Retryable: false,
+			})
 			continue
 		}
 		select {
@@ -69,6 +82,12 @@ func (h *Handler) HandleBatch(w http.ResponseWriter, r *http.Request) {
 		default:
 			// Канал заполнен — не блокируемся, считаем отброшенный лог
 			dropped++
+			failed = append(failed, model.BatchItemError{
+				Index:     i,
+				Status:    "queue_full",
+				Error:     "очередь переполнена, повторите попытку позже",
+				Retryable: true,
+			})
 		}
 	}
 
@@ -76,11 +95,28 @@ func (h *Handler) HandleBatch(w http.ResponseWriter, r *http.Request) {
 	h.dropped.Add(int64(dropped))
 	h.errCount.Add(int64(errs))
 
-	writeJSON(w, http.StatusAccepted, map[string]int{
-		"accepted": accepted,
-		"dropped":  dropped,
-		"errors":   errs,
-	})
+	resp := model.BatchResponse{
+		Accepted: accepted,
+		Dropped:  dropped,
+		Errors:   errs,
+		Failed:   failed,
+	}
+
+	// Определение HTTP-статуса по контракту:
+	if accepted > 0 {
+		writeJSON(w, http.StatusAccepted, resp)
+		return
+	}
+
+	// accepted == 0: полный отказ
+	if dropped > 0 && errs == 0 {
+		// Все записи отклонены исключительно из-за переполнения очереди сервера
+		writeJSON(w, http.StatusServiceUnavailable, resp)
+		return
+	}
+
+	// Все записи содержат ошибки валидации (или смешанный отказ без единого успеха)
+	writeJSON(w, http.StatusUnprocessableEntity, resp)
 }
 
 // enqueue кладёт одиночный лог в канал без блокировки.
