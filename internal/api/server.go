@@ -18,6 +18,7 @@ import (
 // Server — HTTP-сервер агрегатора со всеми зарегистрированными маршрутами.
 type Server struct {
 	cfg       config.ServerConfig
+	logDir    string
 	http      *http.Server
 	handler   *ingest.Handler
 	storage   *storage.Storage
@@ -31,9 +32,11 @@ func New(
 	handler *ingest.Handler,
 	stor *storage.Storage,
 	rtr *router.Router,
+	logDir string,
 ) *Server {
 	s := &Server{
 		cfg:       cfg,
+		logDir:    logDir,
 		handler:   handler,
 		storage:   stor,
 		router:    rtr,

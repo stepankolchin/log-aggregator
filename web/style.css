@@ -250,6 +250,11 @@ input[type="text"] {
   width: 160px;
 }
 
+.btn-group {
+  display: flex;
+  gap: 8px;
+}
+
 button {
   background: var(--accent);
   color: #ffffff;
@@ -259,17 +264,40 @@ button {
   font-size: 13px;
   cursor: pointer;
   font-weight: 500;
-  transition: opacity 0.2s ease;
+  transition: opacity 0.2s ease, background 0.2s ease;
 }
 
-button:hover {
-  opacity: 0.82;
+button:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 button.sec {
   background: var(--surface2);
   color: var(--text);
   border: 1px solid var(--border);
+}
+
+.btn-sm {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.page-label {
+  font-size: 12px;
+  color: var(--muted);
+  min-width: 50px;
+  text-align: center;
 }
 
 .logs-wrap {
@@ -287,6 +315,14 @@ button.sec {
   align-items: center;
 }
 
+.logs-foot {
+  padding: 10px 18px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: flex-end;
+  background: var(--surface);
+}
+
 .logs-head strong {
   font-size: 13px;
 }
@@ -294,6 +330,7 @@ button.sec {
 .logs-head small {
   font-size: 12px;
   color: var(--muted);
+  margin-left: 8px;
 }
 
 .tscroll {

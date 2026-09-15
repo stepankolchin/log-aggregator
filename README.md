@@ -81,19 +81,22 @@ log-aggregator/
 
 ```json
 {
-  "timestamp": "2026-09-12T17:00:00Z",
-  "service":   "auth-service",
-  "level":     "error",
-  "message":   "authentication failed",
-  "host":      "auth-1",
-  "trace_id":  "abc-123",
-  "fields":    { "user_id": "42", "ip": "1.2.3.4" }
+  "timestamp":        "2026-09-12T17:00:00Z",
+  "server_timestamp": "2026-09-12T17:00:00.123Z",
+  "service":          "auth-service",
+  "level":            "error",
+  "message":          "authentication failed",
+  "host":             "auth-1",
+  "trace_id":         "abc-123",
+  "fields":           { "user_id": "42", "ip": "1.2.3.4" }
 }
 ```
 
-**Обязательные поля:** `timestamp`, `service`, `level`, `message`  
-**Допустимые уровни:** `debug`, `info`, `warn`, `error`  
-**Нормализация уровней:** `warning`→`warn`, `fatal`/`critical`/`panic`→`error`, `trace`/`verbose`→`debug`
+- **Обязательные поля при отправке клиентом:** `service`, `level`, `message`
+- **Автоматические поля сервера:** `server_timestamp` (время приёма и регистрации лога агрегатором)
+- **Опциональные поля клиента:** `timestamp` (время возникновения события на клиенте; если не указано — остаётся пустым, а для сортировки и фильтров используется `server_timestamp`), `host`, `trace_id`, `fields`
+- **Допустимые уровни:** `debug`, `info`, `warn`, `error`  
+- **Нормализация уровней:** `warning`→`warn`, `fatal`/`critical`/`panic`→`error`, `trace`/`verbose`→`debug`
 
 ---
 
@@ -114,7 +117,7 @@ worker:
   buffer_size: 1024   # размер внутреннего канала
 
 storage:
-  memory_limit: 5000  # последних N логов в памяти для API (10..1 000 000)
+  memory_limit: 5000  # последних N логов в памяти для API (10..100 000)
 
 sinks:
   stdout:

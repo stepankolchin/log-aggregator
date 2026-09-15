@@ -24,9 +24,9 @@ func Validate(e *model.LogEntry) error {
 		return fmt.Errorf("неверный уровень %q: ожидается debug, info, warn или error", e.Level)
 	}
 
-	// Если клиент не прислал timestamp — ставим текущее время на сервере
-	if e.Timestamp.IsZero() {
-		e.Timestamp = time.Now().UTC()
+	// ServerTimestamp всегда проставляется сервером
+	if e.ServerTimestamp.IsZero() {
+		e.ServerTimestamp = time.Now().UTC()
 	}
 
 	return nil

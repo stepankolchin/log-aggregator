@@ -111,7 +111,7 @@ func main() {
 
 	// ── HTTP-сервер ───────────────────────────────────────────────────────────
 	handler := ingest.NewHandler(queue)
-	srv := api.New(cfg.Server, handler, stor, rtr)
+	srv := api.New(cfg.Server, handler, stor, rtr, cfg.Sinks.File.Dir)
 	srv.Start()
 
 	// ── Ожидание сигнала завершения ───────────────────────────────────────────

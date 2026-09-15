@@ -89,18 +89,43 @@ async function fetchStats() {
   }
 }
 
+let currentOffset = 0;
+let hasMoreLogs = false;
+
+function onSourceChange() {
+  const src = document.getElementById('f-src').value;
+  const isArchive = src === 'file';
+  document.getElementById('wrap-from').style.display = isArchive ? 'flex' : 'none';
+  document.getElementById('wrap-to').style.display = isArchive ? 'flex' : 'none';
+  document.getElementById('logs-title').textContent = isArchive ? 'Архивные логи (Диск)' : 'Последние логи (Live RAM)';
+  currentOffset = 0;
+  fetchLogs();
+}
+
 async function fetchLogs() {
   if (logsAbortController) {
     logsAbortController.abort();
   }
   logsAbortController = new AbortController();
 
+  const src = document.getElementById('f-src').value;
+  const limit = document.getElementById('f-n').value;
+
   const p = new URLSearchParams({
+    source: src,
     service: document.getElementById('f-svc').value,
     level: document.getElementById('f-lvl').value,
     search: document.getElementById('f-q').value,
-    limit: document.getElementById('f-n').value,
+    limit: limit,
+    offset: String(currentOffset),
   });
+
+  if (src === 'file') {
+    const fromVal = document.getElementById('f-from').value;
+    const toVal = document.getElementById('f-to').value;
+    if (fromVal) p.set('from', fromVal);
+    if (toVal) p.set('to', toVal);
+  }
 
   [...p.keys()].forEach((k) => {
     if (!p.get(k)) p.delete(k);
@@ -108,9 +133,41 @@ async function fetchLogs() {
 
   try {
     const res = await fetch('/api/v1/logs?' + p, { signal: logsAbortController.signal });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      const msg = errData.error || `Ошибка сервера (${res.status})`;
+      document.getElementById('tbody').innerHTML = `<tr><td colspan="5" class="empty" style="color:var(--error)">${esc(msg)}</td></tr>`;
+      document.getElementById('log-cnt').textContent = 'ошибка';
+      return;
+    }
+
+    hasMoreLogs = res.headers.get('X-Has-More') === 'true';
     const logs = await res.json();
-    document.getElementById('log-cnt').textContent = `записей: ${logs?.length ?? 0}`;
+
+    const limitNum = Number(limit) || 100;
+    const pageNum = Math.floor(currentOffset / limitNum) + 1;
+    const pageStr = `Стр. ${pageNum}`;
+
+    ['page-num', 'page-num-b'].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = pageStr;
+    });
+
+    const hasPrev = currentOffset > 0;
+    const hasNext = hasMoreLogs;
+
+    ['btn-prev', 'btn-prev-b'].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.disabled = !hasPrev;
+    });
+    ['btn-next', 'btn-next-b'].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.disabled = !hasNext;
+    });
+
+    const cntText = `записей: ${logs?.length ?? 0}${hasMoreLogs ? '+' : ''} (смещение: ${currentOffset})`;
+    document.getElementById('log-cnt').textContent = cntText;
+
     const tb = document.getElementById('tbody');
     if (!logs?.length) {
       tb.innerHTML = '<tr><td colspan="5" class="empty">Логов не найдено</td></tr>';
@@ -121,9 +178,10 @@ async function fetchLogs() {
         const fields =
           e.fields && Object.keys(e.fields).length
             ? `<div class="fields">${esc(JSON.stringify(e.fields))}</div>`
-            : '';
+        const displayTs = e.timestamp || e.server_timestamp;
+        const tsTitle = e.timestamp && e.server_timestamp ? `Client: ${esc(e.timestamp)}\nServer: ${esc(e.server_timestamp)}` : esc(displayTs);
         return `<tr>
-        <td class="ts">${fmtTs(e.timestamp)}</td>
+        <td class="ts" title="${tsTitle}">${fmtTs(displayTs)}</td>
         <td class="svc">${esc(e.service)}</td>
         <td>${badge(e.level)}</td>
         <td class="msg">${esc(e.message)}${fields}</td>
@@ -138,15 +196,33 @@ async function fetchLogs() {
   }
 }
 
+function prevPage() {
+  const limit = Number(document.getElementById('f-n').value) || 100;
+  currentOffset = Math.max(0, currentOffset - limit);
+  fetchLogs();
+}
+
+function nextPage() {
+  if (!hasMoreLogs) return;
+  const limit = Number(document.getElementById('f-n').value) || 100;
+  currentOffset += limit;
+  fetchLogs();
+}
+
 function applyFilters() {
+  currentOffset = 0;
   fetchLogs();
 }
 
 function resetFilters() {
-  ['f-svc', 'f-q'].forEach((id) => (document.getElementById(id).value = ''));
+  ['f-svc', 'f-q', 'f-from', 'f-to'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
   document.getElementById('f-lvl').value = '';
   document.getElementById('f-n').value = '100';
-  fetchLogs();
+  document.getElementById('f-src').value = 'memory';
+  onSourceChange();
 }
 
 function startTimer() {
@@ -156,7 +232,11 @@ function startTimer() {
     document.getElementById('cd').textContent = --cd;
     if (cd <= 0) {
       fetchStats();
-      fetchLogs();
+      // В режиме Live автоматически обновляем первую страницу; в режиме архива не сбиваем просмотр пользователя
+      const isLive = document.getElementById('f-src').value === 'memory';
+      if (isLive && currentOffset === 0) {
+        fetchLogs();
+      }
       cd = TICK;
     }
   }, 1000);
@@ -166,3 +246,4 @@ function startTimer() {
 fetchStats();
 fetchLogs();
 startTimer();
+

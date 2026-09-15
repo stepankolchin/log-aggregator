@@ -62,6 +62,21 @@
 
     <!-- Фильтры -->
     <div class="filters">
+      <div class="fg">
+        <label>Источник</label>
+        <select id="f-src" onchange="onSourceChange()">
+          <option value="memory" selected>Live</option>
+          <option value="file">Архив</option>
+        </select>
+      </div>
+      <div class="fg date-field" id="wrap-from" style="display:none">
+        <label>С даты/времени</label>
+        <input id="f-from" type="datetime-local">
+      </div>
+      <div class="fg date-field" id="wrap-to" style="display:none">
+        <label>По дату/время</label>
+        <input id="f-to" type="datetime-local">
+      </div>
       <div class="fg"><label>Сервис</label><input id="f-svc" type="text" placeholder="auth-service"></div>
       <div class="fg">
         <label>Уровень</label>
@@ -73,10 +88,10 @@
           <option value="error">error</option>
         </select>
       </div>
-      <div class="fg"><label>Поиск</label><input id="f-q" type="text" placeholder="текст в message" style="width:200px">
+      <div class="fg"><label>Поиск</label><input id="f-q" type="text" placeholder="текст в message" style="width:180px">
       </div>
       <div class="fg">
-        <label>Показать</label>
+        <label>На стр.</label>
         <select id="f-n">
           <option value="50">50</option>
           <option value="100" selected>100</option>
@@ -84,15 +99,24 @@
           <option value="500">500</option>
         </select>
       </div>
-      <button onclick="applyFilters()">Применить</button>
-      <button class="sec" onclick="resetFilters()">Сбросить</button>
+      <div class="btn-group">
+        <button onclick="applyFilters()">Применить</button>
+        <button class="sec" onclick="resetFilters()">Сбросить</button>
+      </div>
     </div>
 
     <!-- Таблица логов -->
     <div class="logs-wrap">
       <div class="logs-head">
-        <strong>Последние логи</strong>
-        <small id="log-cnt">загрузка...</small>
+        <div>
+          <strong id="logs-title">Последние логи</strong>
+          <small id="log-cnt">загрузка...</small>
+        </div>
+        <div class="pagination">
+          <button id="btn-prev" class="sec btn-sm" onclick="prevPage()" disabled>← Назад</button>
+          <span id="page-num" class="page-label">Стр. 1</span>
+          <button id="btn-next" class="sec btn-sm" onclick="nextPage()" disabled>Вперёд →</button>
+        </div>
       </div>
       <div class="tscroll">
         <table>
@@ -111,6 +135,13 @@
             </tr>
           </tbody>
         </table>
+      </div>
+      <div class="logs-foot">
+        <div class="pagination">
+          <button id="btn-prev-b" class="sec btn-sm" onclick="prevPage()" disabled>← Назад</button>
+          <span id="page-num-b" class="page-label">Стр. 1</span>
+          <button id="btn-next-b" class="sec btn-sm" onclick="nextPage()" disabled>Вперёд →</button>
+        </div>
       </div>
     </div>
 

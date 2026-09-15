@@ -122,8 +122,8 @@ func Load(path string) (*Config, error) {
 
 // Validate проверяет корректность параметров конфигурации.
 func (c *Config) Validate() error {
-	if c.Storage.MemoryLimit < 10 || c.Storage.MemoryLimit > 1_000_000 {
-		return fmt.Errorf("недопустимый storage.memory_limit=%d: должен быть в диапазоне от 10 до 1 000 000", c.Storage.MemoryLimit)
+	if c.Storage.MemoryLimit < 10 || c.Storage.MemoryLimit > 100_000 {
+		return fmt.Errorf("недопустимый storage.memory_limit=%d: должен быть в диапазоне от 10 до 100 000", c.Storage.MemoryLimit)
 	}
 	if c.Worker.PoolSize < 1 {
 		return fmt.Errorf("worker.pool_size должен быть >= 1 (указано: %d)", c.Worker.PoolSize)

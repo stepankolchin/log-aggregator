@@ -18,8 +18,8 @@ const (
 	MinMemoryLimit = 10
 	// DefaultMemoryLimit — лимит по умолчанию (5 000 записей).
 	DefaultMemoryLimit = 5000
-	// MaxMemoryLimit — абсолютная верхняя граница записей в памяти для предотвращения OOM (1 000 000 записей).
-	MaxMemoryLimit = 1_000_000
+	// MaxMemoryLimit — абсолютная верхняя граница записей в памяти для предотвращения OOM (100 000 записей).
+	MaxMemoryLimit = 100_000
 
 	// MaxQueryLimit — максимальное количество записей, возвращаемых за один API-запрос (1 000).
 	MaxQueryLimit = 1000
@@ -31,8 +31,11 @@ const (
 type QueryParams struct {
 	Service string
 	Level   string
-	Search  string // поиск по подстроке в message
-	Limit   int
+	Search  string    // поиск по подстроке в message
+	From    time.Time // фильтр: время >= From (если указано)
+	To      time.Time // фильтр: время <= To (если указано)
+	Limit   int       // максимальное количество записей
+	Offset  int       // количество пропускаемых записей от начала выборки
 }
 
 // Stats — снимок статистики хранилища.
@@ -63,8 +66,8 @@ func New(limit int) (*Storage, error) {
 	}
 
 	initCap := limit
-	if initCap > 1024 {
-		initCap = 1024
+	if initCap > 4096 {
+		initCap = 4096
 	}
 
 	return &Storage{
@@ -116,6 +119,11 @@ func (s *Storage) Query(p QueryParams) []model.LogEntry {
 		limit = MaxQueryLimit
 	}
 
+	offset := p.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
 	// Выделяем емкость не больше, чем реально доступно в памяти хранилища
 	initCap := limit
 	if len(s.logs) < initCap {
@@ -124,6 +132,7 @@ func (s *Storage) Query(p QueryParams) []model.LogEntry {
 
 	result := make([]model.LogEntry, 0, initCap)
 	search := strings.ToLower(p.Search)
+	matched := 0
 
 	// Обходим с конца — самые новые записи первыми
 	for i := len(s.logs) - 1; i >= 0 && len(result) < limit; i-- {
@@ -137,6 +146,19 @@ func (s *Storage) Query(p QueryParams) []model.LogEntry {
 		if search != "" && !strings.Contains(strings.ToLower(e.Message), search) {
 			continue
 		}
+		t := e.EffectiveTime()
+		if !p.From.IsZero() && t.Before(p.From) {
+			continue
+		}
+		if !p.To.IsZero() && t.After(p.To) {
+			continue
+		}
+
+		matched++
+		if matched <= offset {
+			continue
+		}
+
 		result = append(result, e)
 	}
 	return result
