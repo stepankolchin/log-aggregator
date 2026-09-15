@@ -442,3 +442,134 @@ logger := slog.New(handler.WithAttrs([]slog.Attr{
 logger.Info("started") // → fields: {"component":"payment","version":"1.2.0"}
 ```
 
+## *Покрытие тестами*
+
+### 1. Валидация и приём логов (`internal/ingest`)
+
+| Тест | Описание |
+| :--- | :--- |
+| `TestNormalizeLevel` | Проверка приведения уровней логирования к каноническому виду. |
+| `TestValidate` | Табличный тест валидации входящей записи: обязательность полей `service` и `message`, проверка корректности уровня, простановка серверного `server_timestamp`. |
+
+---
+
+### 2. Конфигурация (`internal/config`)
+
+| Тест | Описание |
+| :--- | :--- |
+| `TestConfig_Validate` | Комплексная валидация `config.yaml`: проверка диапазонов портов, таймаутов, параметров воркер-пула, лимитов памяти хранилища, валидности regex-паттернов маршрутизации и доступности указанных синков. |
+| `TestConfig_LoadInvalidYAML` | Проверка обработки синтаксических ошибок в YAML-файле конфигурации. |
+
+---
+
+### 3. Маршрутизация логов (`internal/router`)
+
+| Тест | Описание |
+| :--- | :--- |
+| `TestRouter_FanOut` | Отправка одного лога сразу в несколько синков при совпадении правил маршрутизации. |
+| `TestRouter_Default` | Срабатывание правила по умолчанию, если ни одно кастомное правило не подошло. |
+| `TestRouter_DefaultNotFiredWhenMatched` | Гарантия того, что дефолтное правило не вызывается, если сработало хотя бы одно специфичное правило. |
+| `TestRouter_LevelsFilter` | Фильтрация сообщений по списку разрешенных уровней. |
+| `TestRouter_MessageRegex` | Фильтрация логов по регулярному выражению в тексте `message`. |
+| `TestRouter_Discard` | Полное отбрасывание лога специальным правилом `discard`. |
+| `TestRouter_InvalidRegex` | Обработка ошибок инициализации при некорректном синтаксисе регулярного выражения. |
+| `TestRouter_UnregisteredSink` | Ошибка инициализации роутера при ссылке на незарегистрированный синк. |
+
+---
+
+### 4. Воркер-пул (`internal/worker`)
+
+| Тест | Описание |
+| :--- | :--- |
+| `TestPool_DrainsQueueOnShutdown` | Проверка корректного дрейна очереди: при закрытии канала (`close(queue)`) воркеры вычитывают все накопленные в буфере сообщения без потерь. |
+| `TestPool_ContextCancelStopsWorkers` | Корректная экстренная остановка горутин воркеров через отмену контекста (`context.Cancel`). |
+
+---
+
+### 5. Синки вывода (`internal/sink`)
+
+| Тест | Описание |
+| :--- | :--- |
+| `TestStdout_Write` | Форматирование вывода в консоль (режимы `json` и человекочитаемый `text`). |
+| `TestFile_Patterns` | Запись логов на диск с поддержкой структуры каталогов (`flat`, `by-service`, `by-date`) и автоматической ротацией файлов по суткам. |
+| `TestWebhook_RetriesAndHeaders` | Отправка логов на внешний HTTP вебхук, передача кастомных заголовков и работа механизма повторных попыток при 5xx ответах. |
+| `TestWebhook_NonRetryable4xx` | Отсутствие бессмысленных повторных попыток при клиентских ошибках 4xx от вебхука. |
+| `TestWebhook_ContextCancel` | Корректное прерывание HTTP-запроса вебхука при отмене контекста. |
+
+---
+
+### 6. Хранилище и архив (`internal/storage`)
+
+| Тест | Описание |
+| :--- | :--- |
+| `TestStorage_NewValidation` | Проверка граничных значений емкости кольцевого буфера памяти. |
+| `TestStorage_StoreAndEviction` | Сохранение логов в память и корректное вытеснение старых записей по принципу очереди при достижении лимита. |
+| `TestStorage_QueryMemorySafety` | Потокобезопасность выборки и возврат глубоких копий срезов из памяти. |
+| `TestStorage_QueryFilters` | Фильтрация логов в оперативной памяти по сервису, уровню, подстроке и диапазону времени. |
+| `TestStorage_LoadFromFile_Success` | Восстановление состояния хранилища из файла при перезапуске агрегатора. |
+| `TestStorage_LoadFromFile_NonExistentDir` | Устойчивость к отсутствию директории с логами при первичном старте. |
+| `TestStorage_LoadFromFile_OnlyFileSinkIsRestored` | Гарантия загрузки данных только для активного файлового синка. |
+| `TestQueryArchive_PaginationAndFilters` | Постраничная выборка из архивных файлов на диске и фильтрация по датам. |
+
+---
+
+### 7. HTTP API, Web UI и Graceful Shutdown (`internal/api`)
+
+| Тест | Описание |
+| :--- | :--- |
+| `TestHandleSingle_ValidLog` | Успешный приём одиночного лога (`POST /api/v1/logs` -> `202 Accepted`). |
+| `TestHandleSingle_InvalidJSON` | Обработка синтаксически некорректного JSON (`400 Bad Request`). |
+| `TestHandleSingle_MissingService` | Отклонение записи без обязательного поля `service` (`422 Unprocessable Entity`). |
+| `TestHandleSingle_InvalidLevel` | Отклонение записи с неизвестным уровнем логирования (`422 Unprocessable Entity`). |
+| `TestHandleBatch` | Пакетный приём логов (`POST /api/v1/logs/batch` -> `202 Accepted`). |
+| `TestHandleBatch_AllValidationErrors` | Отклонение батча, где все записи содержат ошибки валидации (`422 Unprocessable Entity`). |
+| `TestHandleBatch_QueueFull` | Поведение при переполнении входной очереди (`503 Service Unavailable` с флагом `retryable: true` в отчете). |
+| `TestHandleBatch_Empty` | Отклонение пустого массива логов (`400 Bad Request`). |
+| `TestHandleGetLogs` | Выборка логов через API (`GET /api/v1/logs`) с пагинацией и сортировкой от новых к старым. |
+| `TestHandleGetLogs_FilterByService` | Фильтрация API-выборки по имени сервиса. |
+| `TestHandleGetLogs_LimitValidation` | Валидация параметров `limit` и `offset` в запросе к API. |
+| `TestHandleStats` | Получение агрегированной статистики (`GET /api/v1/stats`). |
+| `TestFormatUptime` | Корректное форматирование времени непрерывной работы агрегатора. |
+| `TestHandleRoutes` | Получение активной таблицы маршрутизации (`GET /api/v1/routes`). |
+| `TestHandleHealthz` | Проверка liveness-пробы (`/healthz` -> `200 OK`). |
+| `TestHandleReadyz` | Проверка readiness-пробы (`/readyz`) с переходом в `503` при остановке сервера. |
+| `TestHandleUI` / `TestHandleCSS` / `TestHandleJS` | Раздача статических файлов веб-дашборда (`index.html`, `style.css`, `app.js`). |
+| `TestHandleNotFound` | Обработка обращения к несуществующим маршрутам (`404 Not Found`). |
+| `TestSwaggerUIAndOpenAPI` | Раздача интерактивной документации Swagger UI и спецификаций `openapi.yaml` / `openapi.json`. |
+| `TestServer_Start_PortConflict` | Синхронный возврат ошибки при попытке занять уже используемый порт. |
+| `TestServer_Start_SuccessAndShutdown` | Базовый жизненный цикл запуска и остановки HTTP-сервера на реальном сокете. |
+| `TestServer_GracefulShutdown_UnderLoad` | Корректная остановка агрегатора под непрерывной параллельной нагрузкой от 10 клиентов с гарантией 100% сохранения подтвержденных логов. |
+
+---
+
+### 8. Клиентская библиотека (`pkg/aggregatorslog`)
+
+| Тест | Описание |
+| :--- | :--- |
+| `TestHandler_Success` | Отправка структурированных логов из Go-приложений через стандартный `log/slog.Handler`. |
+| `TestHandler_ErrorStatusCodes_SavedToFallback` | Аварийное сохранение в локальный `fallback` при недоступности агрегатора или ответах 422/503/500. |
+| `TestHandler_WithoutFallback_Dropped` | Корректный подсчет метрики `dropped` при сбое сети и отсутствии fallback-хендлера. |
+| `TestHandler_FallbackFails_Dropped` | Подсчет ошибок, если основной агрегатор и fallback одновременно недоступны. |
+| `TestHandler_NetworkError` | Устойчивость к сетевым ошибкам соединения. |
+| `TestHandler_SlogLoggerIntegration` | Полная совместимость с `slog.New(handler)` и вызовами `slog.Info`, `slog.Error` и др. |
+| `TestHandler_CloningSharesStats` | Разделение атомарных счетчиков статистики между клонированными хендлерами (`WithAttrs`). |
+| `TestHandler_Enabled` | Проверка фильтрации по минимальному уровню логирования (`Level.Level()`). |
+| `TestHandler_WithGroup_PrefixesFields` | Префиксирование полей при группировке (`logger.WithGroup("http")`). |
+| `TestHandler_NestedGroupsAndKindGroup` | Корректная обработка глубоко вложенных групп и составных атрибутов. |
+
+```bash
+go test ./...
+```
+
+<img width="563" height="219" alt="image" src="https://github.com/user-attachments/assets/a42f0e09-8223-4e66-9220-5e32282f159e" />
+
+```bash
+go test -race ./...
+```
+
+<img width="562" height="223" alt="image" src="https://github.com/user-attachments/assets/0ae7b801-4c07-499d-a3a9-265f53953328" />
+
+***Demo***
+
+
+
