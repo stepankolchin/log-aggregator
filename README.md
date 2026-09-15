@@ -571,9 +571,5 @@ go test -race ./...
 
 ***Demo***
 
-![](log-aggregator/media/log-aggregator_demo.mp4)
 
-
-
-#<video width="80%" src="https://github.com/stepankolchin/log-aggregator/media/log-aggregator_demo.mp4" controls></video>
 
